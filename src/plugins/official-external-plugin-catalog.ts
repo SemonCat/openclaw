@@ -107,6 +107,7 @@ type OfficialExternalPluginCatalogManifest = {
   };
   /** Host validation overlays for compatibility-sensitive external channel cutovers. */
   channelHostConfig?: {
+    compatibilityMigration?: string;
     schemaAllOf?: readonly Record<string, unknown>[];
   };
   providers?: readonly OfficialExternalProviderCatalogProvider[];
@@ -1483,6 +1484,17 @@ export function resolveOfficialExternalPluginLegacyIds(
     (getOfficialExternalPluginCatalogManifest(entry)?.legacyPluginIds ?? [])
       .map((pluginId) => normalizeOptionalString(pluginId))
       .filter((pluginId): pluginId is string => Boolean(pluginId)),
+  );
+}
+
+/** Returns the host-owned setup migration selected for an external channel cutover. */
+export function resolveOfficialExternalChannelCompatibilityMigration(
+  channelId: string,
+): string | undefined {
+  const entry = getOfficialExternalPluginCatalogEntry(channelId);
+  return normalizeOptionalString(
+    getOfficialExternalPluginCatalogManifest(entry ?? {})?.channelHostConfig
+      ?.compatibilityMigration,
   );
 }
 
