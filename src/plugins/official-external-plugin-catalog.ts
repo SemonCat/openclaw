@@ -107,6 +107,7 @@ type OfficialExternalPluginCatalogManifest = {
   };
   /** Host validation overlays for compatibility-sensitive external channel cutovers. */
   channelHostConfig?: {
+    docsSource?: "external" | "official";
     compatibilityMigration?: string;
     schemaAllOf?: readonly Record<string, unknown>[];
   };
