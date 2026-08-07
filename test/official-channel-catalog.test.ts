@@ -365,6 +365,7 @@ describe("buildOfficialChannelCatalog", () => {
       channel: {
         id: "qqbot",
         docsPath: "/channels/qqbot",
+        approvalFlags: ["native"],
       },
       install: {
         npmSpec: "@tencent-connect/openclaw-qqbot@2.0.0",

@@ -1111,17 +1111,20 @@ describe("channelsAddCommand", () => {
           plugin: {
             ...createChannelTestPluginBase({ id: "qqbot", label: "QQ Bot" }),
             setup: {
-              applyAccountConfig: ({ cfg, input }: ApplyAccountConfigParams) => ({
-                ...cfg,
-                channels: {
-                  ...cfg.channels,
-                  qqbot: {
-                    appId: input.appId,
-                    clientSecret: input.clientSecret,
-                    allowFrom: ["*"],
+              applyAccountConfig: ({ cfg, input }: ApplyAccountConfigParams) => {
+                const [appId, clientSecret] = input.token?.split(":") ?? [];
+                return {
+                  ...cfg,
+                  channels: {
+                    ...cfg.channels,
+                    qqbot: {
+                      appId,
+                      clientSecret,
+                      allowFrom: ["*"],
+                    },
                   },
-                },
-              }),
+                };
+              },
             },
           },
           source: "test",
@@ -1132,8 +1135,7 @@ describe("channelsAddCommand", () => {
     await channelsAddCommand(
       {
         channel: "qqbot",
-        appId: "app-id",
-        clientSecret: "secret",
+        token: "app-id:secret",
       },
       runtime,
       { hasFlags: true },

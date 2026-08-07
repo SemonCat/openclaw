@@ -1575,6 +1575,9 @@
             "QQBOT_APP_ID",
             "QQBOT_CLIENT_SECRET"
           ],
+          "approvalFlags": [
+            "native"
+          ],
           "systemImage": "bubble.left.and.bubble.right"
         },
         "channelSecrets": {

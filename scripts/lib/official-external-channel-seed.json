@@ -104,6 +104,7 @@
           "docsLabel": "qqbot",
           "blurb": "connect to QQ via official QQ Bot API with group chat and direct message support.",
           "envVars": ["QQBOT_APP_ID", "QQBOT_CLIENT_SECRET"],
+          "approvalFlags": ["native"],
           "systemImage": "bubble.left.and.bubble.right"
         },
         "channelSecrets": {

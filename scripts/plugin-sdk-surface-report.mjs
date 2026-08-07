@@ -231,7 +231,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +4: focused agent scope functions for doctor migration enumeration.
       // +1: shared transcript credential-safety prompt for plugin-owned agent harnesses.
       // +3: channel streaming config reader re-exports and session-agent scope resolver.
-      4844,
+      // +1: QQBot 2.0.1 operator-approval Gateway client compatibility export.
+      4845,
       env,
     ),
     publicFunctionExports: readPluginSdkSurfaceBudgetEnv(
@@ -284,7 +285,8 @@ export function readPluginSdkSurfaceBudgets(env = process.env) {
       // +1: simple channel secret contract factory replacing repeated collectors.
       // +4: focused agent scope functions for doctor migration enumeration.
       // +3: channel streaming config reader functions and session-agent scope resolver.
-      2920,
+      // +1: QQBot 2.0.1 operator-approval Gateway client compatibility export.
+      2921,
       env,
     ),
     publicDeprecatedExports: readPluginSdkSurfaceBudgetEnv(
