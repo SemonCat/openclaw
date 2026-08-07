@@ -253,7 +253,10 @@ describe("listBundledChannelCatalogEntries", () => {
     });
     useBundledPluginsDir(undefined);
 
-    expect(findBundledChannelCatalogMetadata("qqbot")?.approvalFlags).toEqual(["native"]);
+    expect(findBundledChannelCatalogMetadata("qqbot")).toMatchObject({
+      approvalFlags: ["native"],
+      doctorCapabilities: { openDmRequiresAllowFromWildcard: false },
+    });
   });
 
   it("finds doctor capabilities from the generated catalog when the package is excluded", () => {

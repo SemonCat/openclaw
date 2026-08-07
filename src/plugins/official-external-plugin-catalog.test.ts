@@ -1933,6 +1933,9 @@ describe("official external plugin catalog", () => {
     );
     expect(resolveOfficialExternalPluginId(qqbotByChannel)).toBe("openclaw-qqbot");
     expect(qqbotByPlugin).toBe(qqbotByChannel);
+    expect(
+      getOfficialExternalPluginCatalogManifest(qqbotByChannel)?.channel?.doctorCapabilities,
+    ).toEqual({ openDmRequiresAllowFromWildcard: false });
     expect(resolveOfficialExternalPluginInstall(qqbotByChannel)).toEqual({
       npmSpec: "@tencent-connect/openclaw-qqbot@2.0.0",
       defaultChoice: "npm",

@@ -1,5 +1,8 @@
 import { describe, expect, it, vi } from "vitest";
+import { widenOfficialExternalChannelSecretSchema } from "../../../config/official-external-channel-secret-schema.js";
+import { validateJsonSchemaValue } from "../../../plugins/schema-validator.js";
 import { LEGACY_CONFIG_MIGRATIONS_QQBOT } from "./legacy-config-migrations.qqbot.js";
+import { maybeRepairOpenPolicyAllowFrom } from "./open-policy-allowfrom.js";
 
 function migrate(raw: Record<string, unknown>) {
   const config = structuredClone(raw);
@@ -260,6 +263,34 @@ describe("Tencent QQBot 2.0 config migrations", () => {
         },
       },
     });
+  });
+
+  it("remains valid and idempotent through the later open-policy doctor repair", () => {
+    const migrated = migrate({ channels: { qqbot: { allowFrom: ["*"] } } });
+    const repaired = maybeRepairOpenPolicyAllowFrom(migrated.config);
+    const repairedAgain = maybeRepairOpenPolicyAllowFrom(repaired.config);
+    const schema = widenOfficialExternalChannelSecretSchema({
+      channelId: "qqbot",
+      schema: { type: "object", additionalProperties: true },
+    });
+
+    expect(repaired.changes).toEqual([]);
+    expect(repaired.config).toMatchObject({
+      channels: {
+        qqbot: {
+          dmPolicy: "open",
+          allowFrom: ["openclaw:approval-disabled"],
+        },
+      },
+    });
+    expect(repairedAgain).toEqual({ config: repaired.config, changes: [] });
+    expect(
+      validateJsonSchemaValue({
+        cacheKey: "qqbot-doctor-order-regression",
+        schema: schema ?? {},
+        value: (repaired.config.channels as { qqbot: unknown }).qqbot,
+      }).ok,
+    ).toBe(true);
   });
 
   it("keeps an explicit empty DM allowlist restrictive", () => {

@@ -1578,6 +1578,9 @@
           "approvalFlags": [
             "native"
           ],
+          "doctorCapabilities": {
+            "openDmRequiresAllowFromWildcard": false
+          },
           "systemImage": "bubble.left.and.bubble.right"
         },
         "channelSecrets": {
