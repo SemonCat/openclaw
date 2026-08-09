@@ -235,7 +235,12 @@ export type {
   SessionTranscriptMessageEventPage,
 } from "./session-accessor.sqlite-active-events.js";
 export {
+  readSessionTranscriptTitleProbeBatch,
+  type SessionTranscriptTitleProbe,
+} from "./session-accessor.sqlite-title-probes.js";
+export {
   readSessionTranscriptWatermark,
+  readSessionTranscriptWatermarkBatch,
   type SessionTranscriptWatermark,
 } from "./session-accessor.sqlite-transcript-watermark.js";
 export {
