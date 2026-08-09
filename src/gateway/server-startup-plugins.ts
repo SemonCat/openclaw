@@ -142,8 +142,8 @@ export async function prepareGatewayPluginBootstrap(params: {
           workerProviderIds: params.workerProviderIds ?? [],
           ambientEnvTriggers: params.ambientEnvTriggers,
         });
-  // Startup logging consumes the same process-stable manifest snapshot used for
-  // activation planning. Minimal gateways deliberately have no plugin metadata.
+  // Startup logging and lifecycle publication consume the process-stable metadata snapshot.
+  // Minimal gateways skip runtime lookup-table construction, not metadata ownership.
   const pluginManifestRecords =
     pluginLookUpTable?.manifestRegistry.plugins ??
     params.pluginMetadataSnapshot?.manifestRegistry.plugins ??
@@ -228,6 +228,7 @@ export async function prepareGatewayPluginBootstrap(params: {
     deferredConfiguredChannelPluginIds,
     startupPluginIds,
     pluginManifestRecords,
+    pluginMetadataSnapshot: pluginLookUpTable ?? params.pluginMetadataSnapshot,
     pluginLookUpTable,
     baseMethods,
     pluginRegistry,

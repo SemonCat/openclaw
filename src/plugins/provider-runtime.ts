@@ -17,6 +17,7 @@ import type { ProviderSystemPromptContribution } from "../agents/system-prompt-c
 import type { ModelProviderConfig } from "../config/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
 import type { UsageProviderId } from "../infra/provider-usage.types.js";
+import { getCurrentPluginMetadataSnapshot } from "./current-plugin-metadata-snapshot.js";
 import { normalizeProviderModelIdWithManifest } from "./manifest-model-id-normalization.js";
 import type { PluginManifestRecord } from "./manifest-registry.js";
 import { resolvePluginMetadataSnapshot } from "./plugin-metadata-snapshot.js";
@@ -986,11 +987,14 @@ export function resolveExternalAuthProfilesWithPlugins(params: {
 }): ProviderExternalAuthProfile[] {
   const workspaceDir = params.workspaceDir ?? getActivePluginRegistryWorkspaceDirFromState();
   const env = params.env ?? process.env;
-  const { manifestRegistry } = resolvePluginMetadataSnapshot({
-    config: params.config ?? {},
-    workspaceDir,
+  const config = params.config ?? {};
+  const currentMetadataSnapshot = getCurrentPluginMetadataSnapshot({
     env,
+    ...(params.config ? { config } : { requireDefaultDiscoveryContext: true }),
+    ...(workspaceDir ? { workspaceDir } : { allowWorkspaceScopedSnapshot: true }),
   });
+  const { manifestRegistry } =
+    currentMetadataSnapshot ?? resolvePluginMetadataSnapshot({ config, workspaceDir, env });
   const externalAuthPluginIds = resolveExternalAuthProfileProviderPluginIds({
     config: params.config,
     workspaceDir,

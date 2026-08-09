@@ -37,6 +37,7 @@ import { enqueueSystemEvent } from "../infra/system-events.js";
 import { startDiagnosticHeartbeat } from "../logging/diagnostic.js";
 import type { createSubsystemLogger } from "../logging/subsystem.js";
 import { setCurrentPluginMetadataSnapshot } from "../plugins/current-plugin-metadata-snapshot.js";
+import { completePluginMetadataSnapshot } from "../plugins/plugin-metadata-snapshot.js";
 import { getTotalQueueSize } from "../process/command-queue.js";
 import { getActiveGatewayRootWorkCount } from "../process/gateway-work-admission.js";
 import { createLazyPromise } from "../shared/lazy-runtime.js";
@@ -496,6 +497,7 @@ export async function prepareGatewayServerBootstrap(input: {
     deferredConfiguredChannelPluginIds,
     startupPluginIds,
     pluginManifestRecords,
+    pluginMetadataSnapshot,
     pluginLookUpTable,
     baseMethods,
     runtimePluginsLoaded,
@@ -509,7 +511,13 @@ export async function prepareGatewayServerBootstrap(input: {
     sourceConfig: startupLastGoodSnapshot.sourceConfig,
   });
   const coreGatewayMethodNames = listCoreGatewayMethodNames();
-  setCurrentPluginMetadataSnapshot(pluginLookUpTable, {
+  const currentPluginMetadataSnapshot = completePluginMetadataSnapshot({
+    snapshot: pluginMetadataSnapshot,
+    config: startupActivationSourceConfig,
+    env: process.env,
+    workspaceDir: defaultWorkspaceDir,
+  });
+  setCurrentPluginMetadataSnapshot(currentPluginMetadataSnapshot, {
     config: startupActivationSourceConfig,
     compatibleConfigs: [startupRuntimeConfig, cfgAtStart, gatewayPluginConfigAtStart],
     env: process.env,
@@ -565,6 +573,7 @@ export async function prepareGatewayServerBootstrap(input: {
     deferredConfiguredChannelPluginIds,
     startupPluginIds,
     pluginManifestRecords,
+    pluginMetadataSnapshot,
     pluginLookUpTable,
     baseMethods,
     runtimePluginsLoaded,
