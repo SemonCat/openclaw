@@ -2,6 +2,7 @@
 import type { DatabaseSync, SQLInputValue, StatementSync } from "node:sqlite";
 import type { Compilable, CompiledQuery, Kysely, QueryResult } from "kysely";
 import { InsertQueryNode, Kysely as KyselyInstance, SqliteDialect } from "kysely";
+import { createSubsystemLogger } from "../logging/subsystem.js";
 
 // Sync query helpers execute compiled Kysely SQL against node:sqlite without
 // going through Kysely's async driver path.
@@ -18,6 +19,8 @@ const authorizerActiveSymbol = Symbol("openclaw.kyselySyncAuthorizerActive");
 // Process-wide retention scales with open handles; repeated variable SQL can enter.
 const statementCacheCapacity = 32;
 const statementCacheEntryBytes = 64 * 1024;
+const slowQueryLog = createSubsystemLogger("sqlite/query");
+const localSlowQueryThresholdMs = 250;
 
 type SqliteAuthorizer = Parameters<DatabaseSync["setAuthorizer"]>[0];
 
@@ -234,6 +237,7 @@ function executeCompiledSqliteQuerySync<Row>(
   compiledQuery: CompiledQuery<Row>,
 ): QueryResult<Row> {
   const parameters = compiledQuery.parameters as SQLInputValue[];
+  const startedAt = process.env.OPENCLAW_FAST_AGENT_DB_OPEN === "1" ? Date.now() : undefined;
   try {
     return executeWithCachedStatement(db, compiledQuery.sql, parameters, (statement) => {
       if (statement.columns().length > 0) {
@@ -268,6 +272,17 @@ function executeCompiledSqliteQuerySync<Row>(
   } catch (error) {
     reportNodeSqliteKyselyQueryError(db, error);
     throw error;
+  } finally {
+    if (startedAt !== undefined) {
+      const elapsedMs = Date.now() - startedAt;
+      if (elapsedMs >= localSlowQueryThresholdMs) {
+        slowQueryLog.warn("slow synchronous SQLite query", {
+          elapsedMs,
+          parameterCount: parameters.length,
+          sql: compiledQuery.sql.replace(/\s+/gu, " ").trim().slice(0, 1_200),
+        });
+      }
+    }
   }
 }
 

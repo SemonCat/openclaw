@@ -1,8 +1,15 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionsListParams } from "../../../packages/gateway-protocol/src/index.js";
 import { upsertSessionEntry } from "../../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import {
+  clearAgentRunContext,
+  registerAgentRunContext,
+  resetAgentEventsForTest,
+} from "../../infra/agent-events.js";
+import { emitSessionIdentityMutation } from "../../sessions/session-lifecycle-events.js";
 import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
+import { emitSessionsChanged } from "./session-change-event.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
 const loader = vi.hoisted(() => ({ calls: vi.fn(), failNext: false }));
@@ -48,6 +55,7 @@ function requestContext(config: OpenClawConfig): GatewayRequestContext {
   return {
     chatAbortControllers: new Map(),
     getRuntimeConfig: () => config,
+    getSessionEventSubscriberConnIds: () => new Set(),
     loadGatewayModelCatalog: async () => [],
     logGateway: { debug: vi.fn() },
   } as unknown as GatewayRequestContext;
@@ -67,7 +75,7 @@ async function listSessions(params: {
   } as never);
   expect(responses).toHaveLength(1);
   expect(responses[0]?.[0]).toBe(true);
-  return responses[0]?.[1] as { sessions: Array<{ key: string }> };
+  return responses[0]?.[1] as { sessions: Array<{ hasActiveRun?: boolean; key: string }> };
 }
 
 async function seedSessions(): Promise<OpenClawConfig> {
@@ -114,7 +122,12 @@ async function seedSessions(): Promise<OpenClawConfig> {
   return config;
 }
 
+beforeEach(() => {
+  resetAgentEventsForTest();
+});
+
 afterEach(() => {
+  resetAgentEventsForTest();
   vi.restoreAllMocks();
   loader.calls.mockClear();
   loader.failNext = false;
@@ -161,6 +174,106 @@ describe("sessions.list single-flight", () => {
 
       expect(loader.calls).toHaveBeenCalledTimes(1);
       expect(results.every((result) => result === results[0])).toBe(true);
+    });
+  });
+
+  it("reuses a completed result until the session mutation version advances", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const config = await seedSessions();
+      const context = requestContext(config);
+      const client = identifiedClient("owner@example.com");
+      const request = { archived: "all" as const, limit: 100 };
+
+      const first = await listSessions({ client, context, request });
+      const cached = await listSessions({ client, context, request });
+      expect(cached).toBe(first);
+      expect(loader.calls).toHaveBeenCalledTimes(1);
+
+      emitSessionsChanged(context, { reason: "test", sessionKey: "agent:main:active" });
+      await listSessions({ client, context, request });
+      expect(loader.calls).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("expires a completed result after the beta.7 compatibility cache window", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const clock = vi.spyOn(Date, "now").mockReturnValue(1_000);
+      const config = await seedSessions();
+      const context = requestContext(config);
+      const client = identifiedClient("owner@example.com");
+      const request = { archived: "all" as const, limit: 100 };
+
+      const first = await listSessions({ client, context, request });
+      clock.mockReturnValue(5_999);
+      expect(await listSessions({ client, context, request })).toBe(first);
+      clock.mockReturnValue(6_000);
+      expect(await listSessions({ client, context, request })).not.toBe(first);
+      expect(loader.calls).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("does not retain completed results for time-dependent filters", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const config = await seedSessions();
+      const context = requestContext(config);
+      const client = identifiedClient("owner@example.com");
+      const request = { activeMinutes: 1, agentId: "main", limit: 100 };
+
+      await listSessions({ client, context, request });
+      await listSessions({ client, context, request });
+      expect(loader.calls).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("invalidates a completed result after an external identity mutation", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const config = await seedSessions();
+      const context = requestContext(config);
+      const client = identifiedClient("owner@example.com");
+      const request = { archived: "all" as const, limit: 100 };
+
+      await listSessions({ client, context, request });
+      emitSessionIdentityMutation({
+        kind: "create",
+        previous: { sessionKeys: [] },
+        current: { sessionId: "external", sessionKeys: ["agent:main:external"] },
+      });
+      await listSessions({ client, context, request });
+      expect(loader.calls).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("rebuilds a completed result when the projected active-run set changes", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const config = await seedSessions();
+      const context = requestContext(config);
+      const client = identifiedClient("owner@example.com");
+      const request = { agentId: "main", archived: "all" as const, limit: 100 };
+
+      const idle = await listSessions({ client, context, request });
+      expect(idle.sessions.find((session) => session.key === "agent:main:active")).toMatchObject({
+        hasActiveRun: false,
+      });
+
+      registerAgentRunContext("sessions-list-cache-run", {
+        agentId: "main",
+        projectSessionActive: true,
+        sessionId: "main-active",
+        sessionKey: "agent:main:active",
+      });
+      const active = await listSessions({ client, context, request });
+      expect(active.sessions.find((session) => session.key === "agent:main:active")).toMatchObject({
+        hasActiveRun: true,
+      });
+      const activeAgain = await listSessions({ client, context, request });
+      expect(activeAgain).not.toBe(active);
+      expect(loader.calls).toHaveBeenCalledTimes(3);
+
+      clearAgentRunContext("sessions-list-cache-run");
+      const settled = await listSessions({ client, context, request });
+      expect(loader.calls).toHaveBeenCalledTimes(4);
+      expect(await listSessions({ client, context, request })).toBe(settled);
+      expect(loader.calls).toHaveBeenCalledTimes(4);
     });
   });
 

@@ -843,10 +843,10 @@ export class EmbeddedTuiBackend implements TuiBackend {
     controller: AbortController;
   }) {
     const loadOptions = params.agentId ? { agentId: params.agentId } : undefined;
-    const { cfg, canonicalKey, storePath, store, entry } = loadSessionEntry(
-      params.sessionKey,
-      loadOptions,
-    );
+    const { cfg, canonicalKey, storePath, store, entry } = loadSessionEntry(params.sessionKey, {
+      ...loadOptions,
+      includeFullStore: true,
+    });
     if (!entry?.sessionId) {
       throw new Error("/btw requires an active session with existing context.");
     }

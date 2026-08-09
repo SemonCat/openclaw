@@ -29,6 +29,7 @@ type SessionLifecycleListener = (event: SessionLifecycleEvent) => void;
 
 const SESSION_LIFECYCLE_LISTENERS = new Set<SessionLifecycleListener>();
 const SESSION_IDENTITY_MUTATION_LISTENERS = new Set<SessionIdentityMutationListener>();
+let sessionIdentityMutationVersion = 0;
 
 /** Registers a session lifecycle listener. */
 export function onSessionLifecycleEvent(listener: SessionLifecycleListener): () => void {
@@ -56,7 +57,12 @@ export function onSessionIdentityMutation(listener: SessionIdentityMutationListe
   };
 }
 
+export function readSessionIdentityMutationVersion(): number {
+  return sessionIdentityMutationVersion;
+}
+
 export function emitSessionIdentityMutation(mutation: SessionIdentityMutation): void {
+  sessionIdentityMutationVersion += 1;
   for (const listener of SESSION_IDENTITY_MUTATION_LISTENERS) {
     try {
       listener(mutation);

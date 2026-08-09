@@ -13,6 +13,12 @@ type SessionChangedPayload = {
   compacted?: boolean;
 };
 
+const sessionsMutationVersions = new WeakMap<object, number>();
+
+export function readSessionsMutationVersion(context: object): number {
+  return sessionsMutationVersions.get(context) ?? 0;
+}
+
 export function emitSessionsChanged(
   context: Pick<
     GatewayRequestContext,
@@ -23,6 +29,7 @@ export function emitSessionsChanged(
   >,
   payload: SessionChangedPayload,
 ) {
+  sessionsMutationVersions.set(context, readSessionsMutationVersion(context) + 1);
   invalidateSessionSharingSnapshot(payload.sessionKey);
   const connIds = context.getSessionEventSubscriberConnIds();
   if (connIds.size === 0) {

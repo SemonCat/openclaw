@@ -24,7 +24,6 @@ import {
 } from "../../config/sessions.js";
 import { listSessionEntriesReadOnly } from "../../config/sessions/session-accessor.js";
 import { searchSessionTranscripts } from "../../config/sessions/session-transcript-search.js";
-import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { buildProjectedAgentRunIndex } from "../../infra/agent-events.js";
 import {
   measureDiagnosticsTimelineSpan,
@@ -77,45 +76,14 @@ import {
   resolveVisibleActiveSessionRunState,
 } from "./session-active-runs.js";
 import { emitSessionsChanged } from "./session-change-event.js";
+import { respondWithCachedSessionList } from "./sessions-list-cache.js";
 import {
   filterSessionStoreToConfiguredAgents,
   loadSessionEntriesForTarget,
   requireSessionKey,
 } from "./sessions-shared.js";
-import type { GatewayClient, GatewayRequestContext, GatewayRequestHandlers } from "./types.js";
+import type { GatewayRequestHandlers } from "./types.js";
 import { assertValidParams } from "./validation.js";
-
-const sessionListsByContext = new WeakMap<
-  GatewayRequestContext,
-  { config: OpenClawConfig; inFlight: Map<string, Promise<unknown>> }
->();
-
-function sessionListVisibilityIdentity(client: GatewayClient | null): string {
-  if (isGatewayAdmin(client)) {
-    return "admin";
-  }
-  const profileId = gatewayClientSessionCreator(client)?.id;
-  return profileId ? `profile:${profileId}` : "anonymous";
-}
-
-function sessionListWorkKey(params: SessionsListParams, client: GatewayClient | null): string {
-  return JSON.stringify([
-    sessionListVisibilityIdentity(client),
-    Object.entries(params).toSorted(([left], [right]) => left.localeCompare(right)),
-  ]);
-}
-
-function sessionListInflightMap(
-  context: GatewayRequestContext,
-  config: OpenClawConfig,
-): Map<string, Promise<unknown>> {
-  let state = sessionListsByContext.get(context);
-  if (!state || state.config !== config) {
-    state = { config, inFlight: new Map() };
-    sessionListsByContext.set(context, state);
-  }
-  return state.inFlight;
-}
 
 export const sessionReadHandlers: GatewayRequestHandlers = {
   "sessions.search": async ({ params, respond, context, client }) => {
@@ -266,13 +234,6 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
     const p = params as SessionsListParams;
     const cfg = context.getRuntimeConfig();
     const configuredAgentsOnly = p.configuredAgentsOnly === true;
-    const workKey = sessionListWorkKey(p, client);
-    const inFlight = sessionListInflightMap(context, cfg);
-    const pending = inFlight.get(workKey);
-    if (pending) {
-      respond(true, await pending, undefined);
-      return;
-    }
     const run = () =>
       measureDiagnosticsTimelineSpan(
         "gateway.sessions.list",
@@ -498,23 +459,7 @@ export const sessionReadHandlers: GatewayRequestHandlers = {
           },
         },
       );
-    // The delayed computation is the shared promise, so every failure reaches all followers.
-    const operation = new Promise<void>((done) => {
-      setImmediate(done);
-    }).then(() => {
-      // Only the pre-start socket burst may share. Once loading begins, an intervening session
-      // mutation must make the next request build a fresh projection instead of joining this one.
-      inFlight.delete(workKey);
-      return run();
-    });
-    inFlight.set(workKey, operation);
-    try {
-      respond(true, await operation, undefined);
-    } finally {
-      if (inFlight.get(workKey) === operation) {
-        inFlight.delete(workKey);
-      }
-    }
+    await respondWithCachedSessionList({ client, config: cfg, context, request: p, respond, run });
   },
   "sessions.cleanup": async ({ params, respond, context }) => {
     if (!assertValidParams(params, validateSessionsCleanupParams, "sessions.cleanup", respond)) {

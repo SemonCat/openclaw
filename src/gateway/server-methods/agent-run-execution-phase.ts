@@ -198,6 +198,7 @@ export function startAgentRunExecution(params: {
                 const loaded = loadSessionEntry(params.resolvedSessionKey!, {
                   ...(params.activeSessionAgentId ? { agentId: params.activeSessionAgentId } : {}),
                   clone: false,
+                  includeFullStore: true,
                 });
                 const loadedEntry = loaded.entry;
                 const loadedSessionId = loadedEntry?.sessionId?.trim();
