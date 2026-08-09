@@ -951,7 +951,7 @@ describe("session accessor seam", () => {
     expect(fs.existsSync(storePath)).toBe(false);
   });
 
-  it("parses the store once across canonical candidate and transcript reads", async () => {
+  it("does not parse unrelated blobs across canonical candidate and transcript reads", async () => {
     const sessionKey = "agent:main:focused-session";
     await upsertSessionEntry(
       { agentId: "main", sessionKey, storePath },
@@ -978,7 +978,7 @@ describe("session accessor seam", () => {
         legacyKeys: [],
         normalizedKey: sessionKey,
       });
-      expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(1);
+      expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(0);
       expect(
         resolveSessionEntryCandidateTarget({
           agentId: "main",
@@ -994,7 +994,7 @@ describe("session accessor seam", () => {
           storePath,
         }),
       ).toMatchObject({ agentId: "main", sessionId: "focused-session", sessionKey });
-      expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(1);
+      expect(parse.mock.calls.filter(([value]) => value === unrelatedEntryJson)).toHaveLength(0);
     } finally {
       parse.mockRestore();
     }

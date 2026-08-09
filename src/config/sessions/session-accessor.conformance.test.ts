@@ -683,7 +683,7 @@ describe.each([publicAccessorAdapter, sqliteAdapter])(
       });
     });
 
-    it("parses SQLite entry blobs once across keyed loads", async () => {
+    it("parses only the selected SQLite entry across keyed loads", async () => {
       const scope = sqliteAdapter.entryScope(paths);
       for (let index = 0; index < 20; index += 1) {
         await upsertSqliteSessionEntry(
@@ -704,19 +704,31 @@ describe.each([publicAccessorAdapter, sqliteAdapter])(
         updatedAt: 100,
       });
       const parseSpy = vi.spyOn(JSON, "parse");
+      const targetEntryParseCount = () =>
+        parseSpy.mock.calls.filter(
+          ([json]) =>
+            typeof json === "string" &&
+            json.includes('"sessionId":"target-session"') &&
+            json.includes('"model":"target"'),
+        ).length;
 
       try {
         expect(loadSqliteSessionEntry(scope)).toMatchObject({
           model: "target",
           sessionId: "target-session",
         });
-        const initialParseCount = parseSpy.mock.calls.length;
-        expect(initialParseCount).toBe(21);
+        expect(targetEntryParseCount()).toBe(1);
+        expect(
+          parseSpy.mock.calls.some(
+            ([json]) =>
+              typeof json === "string" && json.includes('"sessionId":"unrelated-session-'),
+          ),
+        ).toBe(false);
         expect(loadSqliteSessionEntry(scope)).toMatchObject({
           model: "target",
           sessionId: "target-session",
         });
-        expect(parseSpy).toHaveBeenCalledTimes(initialParseCount);
+        expect(targetEntryParseCount()).toBe(2);
       } finally {
         parseSpy.mockRestore();
       }

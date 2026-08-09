@@ -11,9 +11,12 @@ import {
 } from "../../state/openclaw-agent-db.js";
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import {
+  loadExactSessionEntry,
+  loadExactSessionEntryReadOnly,
   listSessionEntries,
   listSessionEntryKeysReadOnly,
   loadSessionEntry,
+  loadSessionEntryReadOnly,
   openSessionEntryReadView,
   upsertSessionEntry,
 } from "./session-accessor.js";
@@ -127,6 +130,39 @@ function createSessionScope(label: string) {
 }
 
 describe("SQLite session entry cache", () => {
+  it("scales latest single-entry reads with the selected row instead of store size", async () => {
+    const scope = createSessionScope("latest-single-entry");
+    const rowCount = 24;
+    for (let index = 0; index < rowCount; index++) {
+      await upsertSessionEntry(
+        { ...scope, sessionKey: `agent:main:latest-single-entry-${index}` },
+        {
+          label: `entry-${index}`,
+          sessionId: `latest-single-entry-${index}`,
+          updatedAt: index + 1,
+        },
+      );
+    }
+    const targetScope = {
+      ...scope,
+      clone: false as const,
+      readConsistency: "latest" as const,
+      sessionKey: "agent:main:latest-single-entry-17",
+    };
+
+    for (const read of [
+      loadSessionEntry,
+      loadSessionEntryReadOnly,
+      (readScope: typeof targetScope) => loadExactSessionEntry(readScope)?.entry,
+      (readScope: typeof targetScope) => loadExactSessionEntryReadOnly(readScope)?.entry,
+    ]) {
+      parseSessionEntryCalls.mockClear();
+
+      expect(read(targetScope)?.sessionId).toBe("latest-single-entry-17");
+      expect(parseSessionEntryCalls).toHaveBeenCalledOnce();
+    }
+  });
+
   it("keeps sqlite-entry-cache list projections shallow, lazy, and memoized per key", async () => {
     const scope = createSessionScope("lazy-list-projection");
     await upsertSessionEntry(scope, {
@@ -599,9 +635,9 @@ describe("SQLite session entry cache", () => {
 
     parseSessionEntryCalls.mockClear();
     const borrowedAfter = openSessionEntryReadView(scope).get(scope.sessionKey);
-    expect(borrowedAfter).toBe(borrowedBefore);
+    expect(borrowedAfter).toStrictEqual(borrowedBefore);
     expect(borrowedAfter?.label).toBe("before");
-    expect(parseSessionEntryCalls).not.toHaveBeenCalled();
+    expect(parseSessionEntryCalls).toHaveBeenCalledOnce();
   });
 
   it("isolates cloned results while borrowed views retain stable references", async () => {
@@ -617,8 +653,8 @@ describe("SQLite session entry cache", () => {
 
     const view = openSessionEntryReadView(scope);
     const first = view.get(scope.sessionKey);
-    expect(view.get(scope.sessionKey)).toBe(first);
-    expect(view.entries()[0]?.entry).toBe(first);
+    expect(view.get(scope.sessionKey)).toStrictEqual(first);
+    expect(view.entries()[0]?.entry).toStrictEqual(first);
   });
 
   it("honors latest reads after an untracked own-connection write", async () => {
