@@ -248,6 +248,7 @@ describe("listBundledChannelCatalogEntries", () => {
           label: "QQ Bot",
           docsPath: "/channels/qqbot",
           approvalFlags: ["native"],
+          doctorCapabilities: { openDmRequiresAllowFromWildcard: false },
         },
       },
     });
