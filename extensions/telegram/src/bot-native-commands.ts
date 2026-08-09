@@ -1242,7 +1242,7 @@ export const registerTelegramNativeCommands = ({
         botUser: Context["me"],
         msg: NonNullable<Context["message"]>,
         rawText: string,
-      ) => Promise<boolean | undefined>)
+      ) => Promise<boolean>)
     | undefined;
   if (nativeCommandsToHandle.length > 0 || pluginCatalog.commands.length > 0) {
     for (const command of nativeCommandsToHandle) {
@@ -1252,7 +1252,7 @@ export const registerTelegramNativeCommands = ({
         botUser: Context["me"],
         msg: NonNullable<Context["message"]>,
         rawText: string,
-      ): Promise<boolean | undefined> => {
+      ): Promise<boolean> => {
         const runtimeCfg = loadFreshRuntimeConfig();
         const runtimeTelegramCfg = resolveFreshTelegramConfig(runtimeCfg);
         const turnSettings = resolveTelegramMessageTurnSettings({
@@ -1275,7 +1275,7 @@ export const registerTelegramNativeCommands = ({
           requireAuth: true,
         });
         if (!auth) {
-          return;
+          return false;
         }
         const {
           chatId,
@@ -1299,7 +1299,7 @@ export const registerTelegramNativeCommands = ({
           topicAgentId: topicConfig?.agentId,
         });
         if (!runtimeContext) {
-          return;
+          return false;
         }
         const { threadSpec, route, mediaLocalRoots, tableMode, chunkMode } = runtimeContext;
         const threadParams = buildTelegramThreadParams(threadSpec) ?? {};
@@ -1671,7 +1671,7 @@ export const registerTelegramNativeCommands = ({
                 ...threadParams,
               }),
           });
-          return;
+          return false;
         }
         const nativeCommandRuntime = await resolveNativeCommandRuntime();
         const sessionKey = await resolveTargetSessionKey();
