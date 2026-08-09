@@ -3,7 +3,7 @@ import { loadOfficialExternalChannelSecretContractApi } from "./official-externa
 import { createResolverContext } from "./runtime-shared.js";
 
 describe("official external channel secret contracts", () => {
-  it("collects active QQBot root and account SecretRefs for Tencent 2.0.0", () => {
+  it("collects active QQBot root and account SecretRefs for Tencent 2.0.1", () => {
     const config = {
       channels: {
         qqbot: {

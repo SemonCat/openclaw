@@ -1937,10 +1937,10 @@ describe("official external plugin catalog", () => {
       getOfficialExternalPluginCatalogManifest(qqbotByChannel)?.channel?.doctorCapabilities,
     ).toEqual({ openDmRequiresAllowFromWildcard: false });
     expect(resolveOfficialExternalPluginInstall(qqbotByChannel)).toEqual({
-      npmSpec: "@tencent-connect/openclaw-qqbot@2.0.0",
+      npmSpec: "@tencent-connect/openclaw-qqbot@2.0.1",
       defaultChoice: "npm",
       expectedIntegrity:
-        "sha512-8/M8S+PSms7F3ojgcgCZY72nfA5Gzqujo8JhNI4bwNAXSLsvi5qh03RF4qtso+67MN+rM482Cn7G3ZPhqOP78A==",
+        "sha512-2010PaCummeQaxerLtaGfQ/5HChiXaW/KpTERid7V/1zyTs46S2ACi0hgZQ1SB7tH0t1InWr8tzVBJV/pLss3Q==",
     });
     expect(getOfficialExternalChannelSecretContract("qqbot")).toEqual({
       channelId: "qqbot",
