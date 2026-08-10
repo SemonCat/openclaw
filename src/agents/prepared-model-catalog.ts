@@ -24,7 +24,14 @@ import {
   type PreparedModelRuntimeInput,
   type PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.js";
-import { prepareScopedReadOnlyModelCatalog } from "./prepared-model-runtime.scoped-catalog.js";
+import {
+  prepareScopedReadOnlyLiveModelCatalog,
+  prepareScopedReadOnlyModelCatalog,
+} from "./prepared-model-runtime.scoped-catalog.js";
+import {
+  hasResolvedThinkingCatalogEntry,
+  normalizeThinkingCatalogProviders,
+} from "./thinking-runtime.js";
 
 export type LoadPreparedModelCatalogParams = {
   agentId?: string;
@@ -35,6 +42,8 @@ export type LoadPreparedModelCatalogParams = {
   env?: NodeJS.ProcessEnv;
   providerDiscoveryProviderIds?: readonly string[];
   allowGatewaySubagentBinding?: boolean;
+  /** Scoped read-only loads may run live discovery for the scoped providers only. */
+  scopedLiveProviderDiscovery?: boolean;
 };
 
 export type GetPublishedPreparedModelCatalogOwnerParams = Omit<
@@ -287,9 +296,58 @@ async function loadScopedReadOnlyModelCatalog(
       }
     }
   }
-  return prepareScopedReadOnlyModelCatalog(
-    activationExact,
-    params.providerDiscoveryProviderIds ?? [],
+  const prepareScoped =
+    params.scopedLiveProviderDiscovery === true
+      ? prepareScopedReadOnlyLiveModelCatalog
+      : prepareScopedReadOnlyModelCatalog;
+  return prepareScoped(activationExact, params.providerDiscoveryProviderIds ?? []);
+}
+
+/**
+ * Turn-path capability reads must stay off the full live catalog build: manifest metadata first,
+ * then a provider-scoped static catalog, then scoped live discovery for runtime-only models.
+ */
+export async function loadProviderScopedThinkingCatalog(params: {
+  config: OpenClawConfig;
+  provider: string;
+  model: string;
+  agentId?: string;
+  agentDir?: string;
+  workspaceDir?: string;
+}): Promise<ModelCatalogEntry[]> {
+  const { loadManifestModelCatalog } = await import("./model-catalog.js");
+  const manifestCatalog = normalizeThinkingCatalogProviders(
+    loadManifestModelCatalog({
+      config: params.config,
+      ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+    }),
+  );
+  const scopedParams = {
+    config: params.config,
+    ...(params.agentId ? { agentId: params.agentId } : {}),
+    ...(params.agentDir ? { agentDir: params.agentDir } : {}),
+    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+    readOnly: true,
+    providerDiscoveryProviderIds: [params.provider],
+  } satisfies LoadPreparedModelCatalogParams;
+  const entryResolved = (catalog: readonly ModelCatalogEntry[]) =>
+    hasResolvedThinkingCatalogEntry({ catalog, provider: params.provider, model: params.model });
+  if (entryResolved(manifestCatalog)) {
+    return manifestCatalog;
+  }
+  const scopedStatic = normalizeThinkingCatalogProviders(
+    (await loadPreparedModelCatalogSnapshot(scopedParams)).entries,
+  );
+  if (entryResolved(scopedStatic)) {
+    return scopedStatic;
+  }
+  return normalizeThinkingCatalogProviders(
+    (
+      await loadPreparedModelCatalogSnapshot({
+        ...scopedParams,
+        scopedLiveProviderDiscovery: true,
+      })
+    ).entries,
   );
 }
 

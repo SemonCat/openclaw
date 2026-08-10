@@ -53,6 +53,8 @@ vi.mock("./prepared-model-runtime.facts.js", () => ({
 }));
 
 vi.mock("./prepared-model-runtime.scoped-catalog.js", () => ({
+  prepareScopedReadOnlyLiveModelCatalog: (...args: unknown[]) =>
+    mocks.prepareScopedCatalog(...args),
   prepareScopedReadOnlyModelCatalog: (...args: unknown[]) => mocks.prepareScopedCatalog(...args),
 }));
 

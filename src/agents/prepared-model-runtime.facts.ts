@@ -17,7 +17,6 @@ import type { PreparedProviderStaticCatalog } from "../plugins/provider-discover
 import type { ProviderRuntimeModel } from "../plugins/provider-runtime-model.types.js";
 import { withPluginRuntimeRegistryScope } from "../plugins/runtime/gateway-request-scope.js";
 import { resolveRuntimeSyntheticAuthProviderRefs } from "../plugins/synthetic-auth.runtime.js";
-import type { ProviderPlugin } from "../plugins/types.js";
 import type { AgentCredentialMap } from "./agent-auth-credentials.js";
 import { resolveAmbientAgentCredentialsForDiscovery } from "./agent-auth-discovery.js";
 import {
@@ -53,6 +52,11 @@ import {
   type PreparedConfiguredRuntimeModel,
 } from "./prepared-model-runtime.configured.js";
 import { prepareOwnedPluginLoadContext } from "./prepared-model-runtime.plugin-context.js";
+import {
+  listPreparedSyntheticAuthProviderRefs,
+  resolvePreparedSyntheticAuth,
+  scopeSyntheticAuthProviderRefs,
+} from "./prepared-model-runtime.synthetic-auth.js";
 import type {
   PreparedModelRuntimeBuildStats,
   PreparedModelRuntimeCatalogMode,
@@ -153,40 +157,6 @@ function prepareAgentFacts(
       ]),
     ].toSorted((left, right) => left.localeCompare(right)),
   };
-}
-
-function listPreparedSyntheticAuthProviderRefs(providers: readonly ProviderPlugin[]): string[] {
-  return [
-    ...new Set(
-      providers.flatMap((provider) =>
-        typeof provider.resolveSyntheticAuth === "function"
-          ? [provider.id, ...(provider.aliases ?? []), ...(provider.hookAliases ?? [])]
-          : [],
-      ),
-    ),
-  ].toSorted((left, right) => left.localeCompare(right));
-}
-
-function resolvePreparedSyntheticAuth(params: {
-  config: PreparedModelRuntimeInput["config"];
-  provider: string;
-  providers: readonly ProviderPlugin[];
-}): { apiKey?: string } | undefined {
-  const normalizedProvider = normalizeProviderId(params.provider);
-  const providerPlugin = params.providers.find((candidate) =>
-    [candidate.id, ...(candidate.aliases ?? []), ...(candidate.hookAliases ?? [])].some(
-      (ref) => normalizeProviderId(ref) === normalizedProvider,
-    ),
-  );
-  return (
-    providerPlugin?.resolveSyntheticAuth?.({
-      config: params.config,
-      provider: params.provider,
-      providerConfig: Object.entries(params.config.models?.providers ?? {}).find(
-        ([providerId]) => normalizeProviderId(providerId) === normalizedProvider,
-      )?.[1],
-    }) ?? undefined
-  );
 }
 
 export function preparedModelRuntimeWorkspaceFactsKey(input: PreparedModelRuntimeInput): string {
@@ -311,13 +281,16 @@ export async function prepareWorkspaceBuildGroup(
       syntheticAuthProviderRefs:
         catalogMode === "static"
           ? listPreparedSyntheticAuthProviderRefs(preparedSyntheticAuthProviders)
-          : resolveRuntimeSyntheticAuthProviderRefs({
-              config: input.config,
-              env,
-              index: pluginMetadataSnapshot.index,
-              registryDiagnostics: pluginMetadataSnapshot.registryDiagnostics,
-              ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
-            }),
+          : scopeSyntheticAuthProviderRefs(
+              resolveRuntimeSyntheticAuthProviderRefs({
+                config: input.config,
+                env,
+                index: pluginMetadataSnapshot.index,
+                registryDiagnostics: pluginMetadataSnapshot.registryDiagnostics,
+                ...(input.workspaceDir ? { workspaceDir: input.workspaceDir } : {}),
+              }),
+              options.providerDiscoveryProviderIds,
+            ),
       ...(catalogMode === "static"
         ? {
             resolveSyntheticAuth: (provider: string) =>

@@ -9,6 +9,7 @@ import {
 } from "../../acp/runtime/registry.js";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { PluginManifestRegistry } from "../../plugins/manifest-registry.js";
+import { clearPluginMetadataLifecycleCaches } from "../../plugins/plugin-metadata-lifecycle.js";
 import { createTrackedTempDirs } from "../../test-utils/tracked-temp-dirs.js";
 
 const hoisted = vi.hoisted(() => {
@@ -176,6 +177,7 @@ describe("resolvePluginSkillDirs", () => {
   });
 
   beforeEach(() => {
+    clearPluginMetadataLifecycleCaches();
     hoisted.loadPluginManifestRegistryForInstalledIndex.mockReset();
     hoisted.loadPluginManifestRegistryForInstalledIndex.mockReturnValue({
       diagnostics: [],
@@ -184,6 +186,37 @@ describe("resolvePluginSkillDirs", () => {
     hoisted.loadPluginMetadataSnapshot.mockClear();
     hoisted.loadPluginRegistrySnapshot.mockReset();
     hoisted.loadPluginRegistrySnapshot.mockReturnValue({ plugins: [] });
+  });
+
+  it("reuses published plugin skill dirs until metadata lifecycle clear", async () => {
+    const workspaceDir = await tempDirs.make("openclaw-");
+    const pluginRoot = await tempDirs.make("openclaw-plugin-");
+    await fs.mkdir(path.join(pluginRoot, "skills"), { recursive: true });
+    const manifestRegistry = createSinglePluginRegistry({
+      pluginRoot,
+      skills: ["./skills"],
+    });
+    const metadataSnapshot = {
+      manifestRegistry,
+      plugins: manifestRegistry.plugins,
+      normalizePluginId: (pluginId: string) => pluginId,
+    };
+    hoisted.loadPluginMetadataSnapshot
+      .mockReturnValueOnce(metadataSnapshot)
+      .mockReturnValueOnce(metadataSnapshot)
+      .mockReturnValueOnce(metadataSnapshot);
+    const config = {
+      plugins: { entries: { helper: { enabled: true } } },
+    } as OpenClawConfig;
+
+    const first = resolvePluginSkillDirs({ workspaceDir, config });
+    const second = resolvePluginSkillDirs({ workspaceDir, config });
+    expect(second).toBe(first);
+
+    clearPluginMetadataLifecycleCaches();
+    const afterClear = resolvePluginSkillDirs({ workspaceDir, config });
+    expect(afterClear).not.toBe(first);
+    expect(afterClear).toEqual(first);
   });
 
   it.each([

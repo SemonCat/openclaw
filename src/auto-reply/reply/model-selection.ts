@@ -202,6 +202,12 @@ export async function createModelSelectionState(params: {
     (await (
       await loadPreparedModelCatalogRuntime()
     ).loadPreparedModelCatalogSnapshot(catalogScope));
+  const loadScopedThinkingCatalog = async (selectedProvider: string, selectedModel: string) =>
+    (await loadPreparedModelCatalogRuntime()).loadProviderScopedThinkingCatalog({
+      ...catalogScope,
+      provider: selectedProvider,
+      model: selectedModel,
+    });
   const runtimeModelNormalization = resolveRuntimeNormalization(cfg);
   const { manifestPlugins } = runtimeModelNormalization;
 
@@ -237,7 +243,7 @@ export async function createModelSelectionState(params: {
 
   let allowedModelKeys = new Set<string>();
   let allowedModelCatalog: ModelCatalog = configuredModelCatalog;
-  let modelCatalog: ModelCatalog | null = null;
+  let modelCatalog: ModelCatalog | null = params.preparedModelCatalog?.entries ?? null;
   // Whether the loaded catalog is a complete/live snapshot. A degraded catalog
   // (discovery threw, static/empty fallback) must not destroy a pinned override.
   let catalogAuthoritative = true;
@@ -576,10 +582,10 @@ export async function createModelSelectionState(params: {
       return thinkingCatalog;
     }
     let catalogForThinking =
-      allowedModelCatalog.length > 0
-        ? allowedModelCatalog
-        : modelCatalog && modelCatalog.length > 0
-          ? buildThinkingCatalog(modelCatalog)
+      modelCatalog && modelCatalog.length > 0
+        ? buildThinkingCatalog(modelCatalog)
+        : allowedModelCatalog.length > 0
+          ? allowedModelCatalog
           : [];
     let selectedCatalogEntry = findSelectedCatalogEntry({
       catalog: catalogForThinking,
@@ -601,12 +607,9 @@ export async function createModelSelectionState(params: {
         selectedCatalogEntry = manifestSelectedEntry;
       }
     }
-    const shouldHydrateRuntimeCatalog =
-      !modelCatalog && (!selectedCatalogEntry || selectedCatalogEntry.reasoning === undefined);
-    if (shouldHydrateRuntimeCatalog) {
-      modelCatalog = (await loadRuntimeCatalogSnapshot()).entries;
-      logStage("catalog-loaded-for-thinking", `entries=${modelCatalog.length}`);
-      const runtimeCatalog = buildThinkingCatalog(modelCatalog);
+    if (!selectedCatalogEntry || selectedCatalogEntry.reasoning === undefined) {
+      // Thinking capability is a per-model fact; never materialize the full live catalog here.
+      const runtimeCatalog = buildThinkingCatalog(await loadScopedThinkingCatalog(provider, model));
       const runtimeSelectedEntry = findSelectedCatalogEntry({
         catalog: runtimeCatalog,
         provider,
@@ -673,7 +676,7 @@ export async function createModelSelectionState(params: {
     if (defaultReasoningLevel) {
       return defaultReasoningLevel;
     }
-    let catalogForReasoning = modelCatalog ?? allowedModelCatalog;
+    let catalogForReasoning = thinkingCatalog ?? modelCatalog ?? allowedModelCatalog;
     let selectedReasoningEntry = findSelectedCatalogEntry({
       catalog: catalogForReasoning,
       provider,
@@ -695,13 +698,16 @@ export async function createModelSelectionState(params: {
         selectedReasoningEntry = manifestSelectedEntry;
       }
     }
-    if (
-      (!catalogForReasoning || catalogForReasoning.length === 0) &&
-      selectedReasoningEntry?.reasoning === undefined
-    ) {
-      modelCatalog = (await loadRuntimeCatalogSnapshot()).entries;
-      logStage("catalog-loaded-for-reasoning", `entries=${modelCatalog.length}`);
-      catalogForReasoning = modelCatalog;
+    if (selectedReasoningEntry?.reasoning === undefined) {
+      const runtimeCatalog = await loadScopedThinkingCatalog(provider, model);
+      const runtimeSelectedEntry = findSelectedCatalogEntry({
+        catalog: runtimeCatalog,
+        provider,
+        model,
+      });
+      if (runtimeSelectedEntry?.reasoning !== undefined) {
+        catalogForReasoning = runtimeCatalog;
+      }
     }
     defaultReasoningLevel = resolveReasoningDefault({
       provider,
