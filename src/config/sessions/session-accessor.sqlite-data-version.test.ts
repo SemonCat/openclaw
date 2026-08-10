@@ -18,6 +18,7 @@ import {
   upsertSessionEntry,
 } from "./session-accessor.js";
 import { readSqliteSessionEntryCache } from "./session-accessor.sqlite-entry-cache.js";
+import { writeSessionEntry } from "./session-accessor.sqlite-entry-store.js";
 import { ensureTranscriptSessionRoot } from "./session-accessor.sqlite-transcript-state.js";
 
 const parseSessionEntryCalls = vi.hoisted(() => vi.fn());
@@ -515,6 +516,37 @@ describe("SQLite session entry cache", () => {
     expect(after.find((row) => row.sessionKey === scope.sessionKey)?.entry).toBe(existing);
     expect(parseSessionEntryCalls).not.toHaveBeenCalled();
     expect(listProjectionCalls).toHaveBeenCalledOnce();
+  });
+
+  it("publishes the final committed row after later same-transaction maintenance", async () => {
+    const scope = createSessionScope("write-through-final-row");
+    await upsertSessionEntry(scope, {
+      label: "projection-probe-before",
+      sessionId: "write-through-final-row",
+      updatedAt: 1,
+    });
+    listSessionEntries({ ...scope, clone: false, projection: "list" });
+
+    runOpenClawAgentWriteTransaction((database) => {
+      writeSessionEntry(database, scope.sessionKey, {
+        label: "projection-probe-intermediate",
+        sessionId: "write-through-final-row",
+        updatedAt: 2,
+      });
+      const committedEntry = {
+        label: "projection-probe-committed",
+        sessionId: "write-through-final-row",
+        updatedAt: 2,
+      };
+      database.db
+        .prepare("UPDATE session_nodes SET entry_json = ? WHERE session_key = ?")
+        .run(JSON.stringify(committedEntry), scope.sessionKey);
+    }, scope);
+
+    parseSessionEntryCalls.mockClear();
+    const after = listSessionEntries({ ...scope, clone: false, projection: "list" });
+    expect(after[0]?.entry.label).toBe("projection-probe-committed");
+    expect(parseSessionEntryCalls).not.toHaveBeenCalled();
   });
 
   it("does not let a tracked write mask an earlier raw connection write", async () => {

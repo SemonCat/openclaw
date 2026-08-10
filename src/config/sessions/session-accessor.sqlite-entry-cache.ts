@@ -259,25 +259,32 @@ function publishTrackedCacheUpdate(database: OpenClawAgentDatabase, publish: () 
 
 function publishSqliteSessionEntryCacheUpsert(
   database: OpenClawAgentDatabase,
-  row: {
+  trackedRow: {
     current_session_id: string;
     entry_json: string;
     session_key: string;
     updated_at: number;
   },
 ): void {
-  const entry = parseSqliteSessionEntryJson({
-    current_session_id: row.current_session_id,
-    entry_json: row.entry_json,
-    updated_at: row.updated_at,
-  });
-  if (!entry) {
-    invalidateTrackedCache(database);
-    return;
-  }
   publishTrackedCacheUpdate(database, () => {
     const cached = sessionEntryCaches.get(database.db);
     if (!cached) {
+      return;
+    }
+    // The accessor may perform maintenance after writeSessionEntry but before COMMIT.
+    // Read the authoritative committed row instead of publishing an intermediate value.
+    const db = getSessionKysely(database.db);
+    const row = executeSqliteQuerySync(
+      database.db,
+      db
+        .selectFrom("session_nodes")
+        .select(["current_session_id", "entry_json", "session_key", "updated_at"])
+        .where("session_key", "=", trackedRow.session_key)
+        .limit(1),
+    ).rows[0];
+    const entry = row ? parseSqliteSessionEntryJson(row) : null;
+    if (!row || !entry) {
+      sessionEntryCaches.delete(database.db);
       return;
     }
     const entries = new Map(cached.entries);

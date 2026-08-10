@@ -72,7 +72,12 @@ function loadGatewayStoreEntries(params: {
   projection: GatewaySessionEntryProjection;
   storePath: string;
 }) {
-  const listEntries = params.includeOpenDatabases ? listSessionEntries : listSessionEntriesReadOnly;
+  // Local fast-open mode deliberately keeps the durable Gateway database handle open.
+  // That lets the tracked entry cache survive across differently-shaped sessions.list
+  // requests instead of reopening SQLite and materializing every entry_json each time.
+  const useProcessHeldCache =
+    params.includeOpenDatabases || process.env.OPENCLAW_FAST_AGENT_DB_OPEN === "1";
+  const listEntries = useProcessHeldCache ? listSessionEntries : listSessionEntriesReadOnly;
   return listEntries({
     agentId: params.agentId,
     clone: false,

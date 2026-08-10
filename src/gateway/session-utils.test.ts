@@ -2139,6 +2139,44 @@ describe("gateway session utils", () => {
     }
   });
 
+  test("loadSessionEntry clones only the selected row by default", async () => {
+    resetConfigRuntimeState();
+    try {
+      await withStateDirEnv("session-utils-exact-entry-", async ({ stateDir }) => {
+        const storePath = path.join(stateDir, "agents", "main", "sessions", "sessions.json");
+        const cfg = {
+          session: { mainKey: "main", store: storePath },
+          agents: { list: [{ id: "main", default: true }] },
+        } as OpenClawConfig;
+        const selectedKey = "agent:main:main";
+        const now = Date.now();
+        await seedSessionEntries(storePath, {
+          [selectedKey]: { sessionId: "selected", updatedAt: now },
+          ...Object.fromEntries(
+            Array.from({ length: 40 }, (_, index) => [
+              `agent:main:unrelated-${index}`,
+              { sessionId: `unrelated-${index}`, updatedAt: now + index + 1 },
+            ]),
+          ),
+        });
+        setRuntimeConfigSnapshot(cfg, cfg);
+        const cloneSpy = vi.spyOn(globalThis, "structuredClone");
+        try {
+          const loaded = loadSessionEntry("main");
+
+          expect(loaded.entry?.sessionId).toBe("selected");
+          expect(Object.keys(loaded.store)).toEqual([selectedKey]);
+          expect(loaded.entry).toBe(loaded.store[selectedKey]);
+          expect(cloneSpy).toHaveBeenCalledTimes(1);
+        } finally {
+          cloneSpy.mockRestore();
+        }
+      });
+    } finally {
+      resetConfigRuntimeState();
+    }
+  });
+
   test("single-row child candidates reuse stable entry identities across sparse stores", () => {
     const parentKey = "agent:main:main";
     let spawnedByReads = 0;

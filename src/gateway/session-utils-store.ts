@@ -123,19 +123,27 @@ function readAcpMetaForDeletedAgentCheck(params: {
 
 function loadSessionEntryWithMode(
   sessionKey: string,
-  opts: { agentId?: string; clone?: boolean; includeStoreChildEntries?: boolean } | undefined,
+  opts:
+    | {
+        agentId?: string;
+        clone?: boolean;
+        includeFullStore?: boolean;
+        includeStoreChildEntries?: boolean;
+      }
+    | undefined,
   readOnly: boolean,
 ) {
   const cfg = getRuntimeConfig();
   const key = normalizeOptionalString(sessionKey) ?? "";
+  const exactRead = opts?.includeFullStore !== true;
   const target = resolveGatewaySessionStoreTargetWithStore({
     cfg,
     key,
     ...(opts?.clone === false ? { clone: false } : {}),
     ...(opts?.agentId ? { agentId: opts.agentId } : {}),
+    ...(exactRead ? { exactRead: true } : {}),
     ...(readOnly
       ? {
-          exactRead: true,
           readOnly: true,
           ...(opts?.includeStoreChildEntries ? { includeStoreChildEntries: true } : {}),
         }
@@ -145,10 +153,15 @@ function loadSessionEntryWithMode(
   const store = target.store;
   const canonicalMatch = resolveCanonicalSessionStoreMatchFromStoreKeys(store, target.storeKeys);
   const legacyKey = canonicalMatch?.key !== target.canonicalKey ? canonicalMatch?.key : undefined;
-  const entry =
-    readOnly && opts?.clone !== false && canonicalMatch?.entry
-      ? structuredClone(canonicalMatch.entry)
-      : canonicalMatch?.entry;
+  let entry = canonicalMatch?.entry;
+  if (exactRead && opts?.clone !== false && canonicalMatch) {
+    entry = structuredClone(canonicalMatch.entry);
+    // Preserve loadSessionEntry's mutable snapshot contract: its selected entry
+    // remains the same object exposed through the returned sparse store.
+    if (!readOnly) {
+      store[canonicalMatch.key] = entry;
+    }
+  }
   return {
     cfg,
     storePath,
@@ -160,7 +173,10 @@ function loadSessionEntryWithMode(
   };
 }
 
-export function loadSessionEntry(sessionKey: string, opts?: { agentId?: string; clone?: boolean }) {
+export function loadSessionEntry(
+  sessionKey: string,
+  opts?: { agentId?: string; clone?: boolean; includeFullStore?: boolean },
+) {
   return loadSessionEntryWithMode(sessionKey, opts, false);
 }
 

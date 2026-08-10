@@ -57,10 +57,10 @@ export function createGatewayChatUserTurnController(params: {
     input: baseInput,
     resolveInput: () => inputPromise,
     target: () => {
-      const { storePath, store, entry } = loadSessionEntry(
-        params.sessionKey,
-        params.sessionLoadOptions,
-      );
+      const { storePath, store, entry } = loadSessionEntry(params.sessionKey, {
+        ...params.sessionLoadOptions,
+        includeFullStore: true,
+      });
       if (!entry?.sessionId || entry.sessionId !== acceptedSessionId) {
         return undefined;
       }
