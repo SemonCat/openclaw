@@ -146,19 +146,10 @@ export async function respondWithCachedSessionList(params: {
     return;
   }
 
-  let operation: SessionListOperation;
-  const promise = new Promise<void>((done) => {
-    setImmediate(done);
-  })
-    .then(() => {
-      // Preserve beta.7's mutation safety: only the pre-start socket burst shares work.
-      // Once loading begins, a direct store mutation that has no gateway context must make
-      // the next request build a fresh projection instead of joining this one.
-      if (state.inFlight.get(workKey) === operation) {
-        state.inFlight.delete(workKey);
-      }
-      return params.run();
-    })
+  // Requests share work only while every projection fence still matches. A mutation that
+  // lands during the load advances its owner before the next request checks this operation.
+  const promise = Promise.resolve()
+    .then(params.run)
     .then((result) => {
       if (cacheCompleted && matchesSessionListFence(readSessionListFence(params.context), fence)) {
         const expiresAt = resolveSessionListExpiration(result);
@@ -168,7 +159,7 @@ export async function respondWithCachedSessionList(params: {
       }
       return result;
     });
-  operation = { ...fence, promise };
+  const operation = { ...fence, promise };
   state.inFlight.set(workKey, operation);
   try {
     params.respond(true, await promise, undefined);

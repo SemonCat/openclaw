@@ -12,7 +12,12 @@ import { withOpenClawTestState } from "../../test-utils/openclaw-test-state.js";
 import { emitSessionsChanged } from "./session-change-event.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
-const loader = vi.hoisted(() => ({ calls: vi.fn(), failNext: false }));
+const loader = vi.hoisted(() => ({
+  calls: vi.fn(),
+  failNext: false,
+  rowCalls: vi.fn(),
+  rowGate: undefined as Promise<void> | undefined,
+}));
 
 vi.mock("../session-utils.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../session-utils.js")>();
@@ -27,6 +32,13 @@ vi.mock("../session-utils.js", async (importOriginal) => {
         throw new Error("synthetic store load failure");
       }
       return actual.loadCombinedSessionStoreForGateway(...args);
+    },
+    listSessionsFromStoreAsync: async (
+      ...args: Parameters<typeof actual.listSessionsFromStoreAsync>
+    ) => {
+      loader.rowCalls(...args);
+      await loader.rowGate;
+      return await actual.listSessionsFromStoreAsync(...args);
     },
   };
 });
@@ -131,6 +143,8 @@ afterEach(() => {
   vi.restoreAllMocks();
   loader.calls.mockClear();
   loader.failNext = false;
+  loader.rowCalls.mockClear();
+  loader.rowGate = undefined;
 });
 
 describe("sessions.list single-flight", () => {
@@ -174,6 +188,32 @@ describe("sessions.list single-flight", () => {
 
       expect(loader.calls).toHaveBeenCalledTimes(1);
       expect(results.every((result) => result === results[0])).toBe(true);
+    });
+  });
+
+  it("shares identical work after row hydration has started", async () => {
+    await withOpenClawTestState({ scenario: "minimal" }, async () => {
+      const config = await seedSessions();
+      const context = requestContext(config);
+      const client = identifiedClient("owner@example.com");
+      const request = { archived: "all" as const, limit: 100 };
+      let releaseRows!: () => void;
+      loader.rowGate = new Promise<void>((resolve) => {
+        releaseRows = resolve;
+      });
+
+      const leader = listSessions({ client, context, request });
+      await vi.waitFor(() => expect(loader.rowCalls).toHaveBeenCalledOnce());
+      const follower = listSessions({ client, context, request });
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+
+      expect(loader.rowCalls).toHaveBeenCalledOnce();
+      releaseRows();
+      const [leaderResult, followerResult] = await Promise.all([leader, follower]);
+      expect(followerResult).toBe(leaderResult);
+      expect(loader.calls).toHaveBeenCalledOnce();
     });
   });
 
