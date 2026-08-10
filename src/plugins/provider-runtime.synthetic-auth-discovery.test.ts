@@ -113,4 +113,26 @@ describe("resolveProviderSyntheticAuthWithPlugin", () => {
       mode: "api-key",
     });
   });
+
+  it("keeps an ownerless fallback on synthetic-auth discovery entries", () => {
+    resolvePluginDiscoveryProvidersRuntime.mockClear();
+
+    expect(
+      resolveProviderSyntheticAuthWithPlugin({
+        provider: "custom-runtime",
+        context: {
+          config: undefined,
+          provider: "custom-runtime",
+          providerConfig: undefined,
+        },
+      }),
+    ).toBeUndefined();
+
+    expect(resolvePluginDiscoveryProvidersRuntime).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        discoveryEntriesOnly: true,
+        includeSyntheticAuthProviders: true,
+      }),
+    );
+  });
 });

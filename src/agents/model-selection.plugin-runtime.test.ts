@@ -34,6 +34,7 @@ vi.mock("./model-catalog.runtime.js", () => ({
   loadManifestModelCatalog: () => [],
   loadPreparedModelCatalog: async () => [],
   loadPreparedModelCatalogSnapshot: loadPreparedModelCatalogSnapshotMock,
+  loadProviderScopedThinkingCatalog: async () => [],
 }));
 
 let createModelSelectionStateForTest: typeof import("../auto-reply/reply/model-selection.js").createModelSelectionState;

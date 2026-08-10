@@ -11,6 +11,7 @@ import {
 import {
   loadManifestModelCatalog,
   loadPreparedModelCatalog as loadModelCatalogLocal,
+  loadProviderScopedThinkingCatalog as loadScopedThinkingCatalog,
 } from "../../agents/model-catalog.runtime.js";
 import { resolveModelCandidateChain } from "../../agents/model-fallback-candidates.js";
 import type { OpenClawConfig } from "../../config/config.js";
@@ -41,6 +42,7 @@ const catalogRuntimeMocks = vi.hoisted(() => {
       const entries = await loadModelCatalog(params as never);
       return { entries, routeVariants: entries, authoritative: true };
     }),
+    loadScopedThinkingCatalog: vi.fn(async (params?: unknown) => loadModelCatalog(params as never)),
   };
 });
 
@@ -48,6 +50,7 @@ vi.mock("../../agents/model-catalog.runtime.js", () => ({
   loadManifestModelCatalog: vi.fn(() => []),
   loadPreparedModelCatalog: catalogRuntimeMocks.loadModelCatalog,
   loadPreparedModelCatalogSnapshot: catalogRuntimeMocks.loadModelCatalogSnapshot,
+  loadProviderScopedThinkingCatalog: catalogRuntimeMocks.loadScopedThinkingCatalog,
 }));
 
 vi.mock("../../agents/provider-model-normalization.runtime.js", () => ({
@@ -284,9 +287,11 @@ describe("createModelSelectionState catalog loading", () => {
     expect(loadModelCatalogLocal).not.toHaveBeenCalled();
   });
 
-  it("hydrates runtime catalog metadata when the configured allowlist entry lacks reasoning", async () => {
+  it("hydrates provider-scoped metadata when the configured allowlist entry lacks reasoning", async () => {
     vi.mocked(loadModelCatalogLocal).mockClear();
-    vi.mocked(loadModelCatalogLocal).mockResolvedValueOnce([
+    vi.mocked(loadScopedThinkingCatalog).mockClear();
+    catalogRuntimeMocks.loadModelCatalogSnapshot.mockClear();
+    vi.mocked(loadScopedThinkingCatalog).mockResolvedValueOnce([
       { provider: "openai", id: "gpt-5.4", name: "GPT-5.4", reasoning: true },
     ]);
     const cfg = {
@@ -318,7 +323,12 @@ describe("createModelSelectionState catalog loading", () => {
     });
 
     await expect(state.resolveDefaultThinkingLevel()).resolves.toBe("medium");
-    expect(loadModelCatalogLocal).toHaveBeenCalledOnce();
+    expect(loadScopedThinkingCatalog).toHaveBeenCalledOnce();
+    expect(loadScopedThinkingCatalog).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "openai", model: "gpt-5.4" }),
+    );
+    expect(loadModelCatalogLocal).not.toHaveBeenCalled();
+    expect(catalogRuntimeMocks.loadModelCatalogSnapshot).not.toHaveBeenCalled();
   });
 
   it("uses the prepared gateway owner catalog without an exact-generation reload", async () => {

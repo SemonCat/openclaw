@@ -35,6 +35,8 @@ vi.mock("../agents/embedded-agent.js", () => ({
 vi.mock("../agents/model-catalog.runtime.js", () => ({
   loadPreparedModelCatalog: (...args: unknown[]) =>
     replyRuntimeMockState.mocks.loadModelCatalog(...args),
+  loadProviderScopedThinkingCatalog: (...args: unknown[]) =>
+    replyRuntimeMockState.mocks.loadModelCatalog(...args),
 }));
 
 vi.mock("../agents/auth-profiles/session-override.js", () => ({

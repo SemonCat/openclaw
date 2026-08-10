@@ -131,6 +131,8 @@ installModelCatalogMock();
 vi.doMock("../../../src/agents/prepared-model-catalog.js", () => ({
   loadPreparedModelCatalog: (...args: unknown[]) =>
     modelCatalogMocks.loadPreparedModelCatalog(...args),
+  loadProviderScopedThinkingCatalog: (...args: unknown[]) =>
+    modelCatalogMocks.loadPreparedModelCatalog(...args),
   loadPreparedModelCatalogSnapshot: async (...args: unknown[]) => {
     const entries = await modelCatalogMocks.loadPreparedModelCatalog(...args);
     return { entries, routeVariants: entries, authoritative: true };
@@ -140,6 +142,8 @@ vi.doMock("../../../src/agents/prepared-model-catalog.js", () => ({
 vi.doMock("../../../src/agents/model-catalog.runtime.js", () => ({
   loadManifestModelCatalog: () => modelCatalogMocks.loadManifestModelCatalog(),
   loadPreparedModelCatalog: (...args: unknown[]) =>
+    modelCatalogMocks.loadPreparedModelCatalog(...args),
+  loadProviderScopedThinkingCatalog: (...args: unknown[]) =>
     modelCatalogMocks.loadPreparedModelCatalog(...args),
   loadPreparedModelCatalogSnapshot: async (...args: unknown[]) => {
     const entries = await modelCatalogMocks.loadPreparedModelCatalog(...args);

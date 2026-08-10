@@ -12,6 +12,7 @@ import type { ModelCatalogEntry, ModelCatalogSnapshot } from "./model-catalog.ty
 import { resolvePublishedModelCatalogOwner } from "./prepared-model-catalog-owner.js";
 import { PreparedModelCatalogConfigReplacedError } from "./prepared-model-catalog.errors.js";
 import type { ResolvedPublishedModelCatalogOwner } from "./prepared-model-catalog.types.js";
+import { isPreparedModelCatalogFull } from "./prepared-model-runtime.facts.js";
 import {
   acquireAgentRunPreparedModelRuntime,
   acquireReadOnlyPreparedModelRuntime,
@@ -23,6 +24,14 @@ import {
   type PreparedModelRuntimeInput,
   type PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.js";
+import {
+  prepareScopedReadOnlyLiveModelCatalog,
+  prepareScopedReadOnlyModelCatalog,
+} from "./prepared-model-runtime.scoped-catalog.js";
+import {
+  hasResolvedThinkingCatalogEntry,
+  normalizeThinkingCatalogProviders,
+} from "./thinking-runtime.js";
 
 export type LoadPreparedModelCatalogParams = {
   agentId?: string;
@@ -31,6 +40,9 @@ export type LoadPreparedModelCatalogParams = {
   readOnly?: boolean;
   workspaceDir?: string;
   env?: NodeJS.ProcessEnv;
+  providerDiscoveryProviderIds?: readonly string[];
+  /** Scoped read-only loads may run live discovery for the scoped providers only. */
+  scopedLiveProviderDiscovery?: boolean;
 };
 
 type PreparedModelCatalogConfigPolicy = "exact" | "published";
@@ -231,6 +243,82 @@ async function loadPreparedModelCatalogOwnerSnapshotWithPolicy(
   );
 }
 
+async function loadScopedReadOnlyModelCatalog(
+  params: LoadPreparedModelCatalogParams,
+): Promise<ModelCatalogSnapshot> {
+  const { activationExact, activationFull, full } = resolveInputs(params);
+  const fullCandidates =
+    activationFull.workspaceDir === full.workspaceDir ? [full] : [full, activationFull];
+  for (const candidate of fullCandidates) {
+    try {
+      const prepared = await prepareModelRuntimeSnapshot(candidate);
+      if (!preparedModelRuntimeConfigsMatch(prepared.config, candidate.config)) {
+        throw new PreparedModelCatalogConfigReplacedError(candidate.agentDir);
+      }
+      if (isPreparedModelCatalogFull(prepared.modelCatalog)) {
+        return prepared.modelCatalog;
+      }
+    } catch (error) {
+      if (!(error instanceof PreparedModelRuntimeOwnerNotPublishedError)) {
+        throw error;
+      }
+    }
+  }
+  const prepareScoped =
+    params.scopedLiveProviderDiscovery === true
+      ? prepareScopedReadOnlyLiveModelCatalog
+      : prepareScopedReadOnlyModelCatalog;
+  return prepareScoped(activationExact, params.providerDiscoveryProviderIds ?? []);
+}
+
+/**
+ * Turn-path capability reads must stay off the full live catalog build: manifest metadata first,
+ * then a provider-scoped static catalog, then scoped live discovery for runtime-only models.
+ */
+export async function loadProviderScopedThinkingCatalog(params: {
+  config: OpenClawConfig;
+  provider: string;
+  model: string;
+  agentId?: string;
+  agentDir?: string;
+  workspaceDir?: string;
+}): Promise<ModelCatalogEntry[]> {
+  const { loadManifestModelCatalog } = await import("./model-catalog.js");
+  const manifestCatalog = normalizeThinkingCatalogProviders(
+    loadManifestModelCatalog({
+      config: params.config,
+      ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+    }),
+  );
+  const scopedParams = {
+    config: params.config,
+    ...(params.agentId ? { agentId: params.agentId } : {}),
+    ...(params.agentDir ? { agentDir: params.agentDir } : {}),
+    ...(params.workspaceDir ? { workspaceDir: params.workspaceDir } : {}),
+    readOnly: true,
+    providerDiscoveryProviderIds: [params.provider],
+  } satisfies LoadPreparedModelCatalogParams;
+  const entryResolved = (catalog: readonly ModelCatalogEntry[]) =>
+    hasResolvedThinkingCatalogEntry({ catalog, provider: params.provider, model: params.model });
+  if (entryResolved(manifestCatalog)) {
+    return manifestCatalog;
+  }
+  const scopedStatic = normalizeThinkingCatalogProviders(
+    (await loadPreparedModelCatalogSnapshot(scopedParams)).entries,
+  );
+  if (entryResolved(scopedStatic)) {
+    return scopedStatic;
+  }
+  return normalizeThinkingCatalogProviders(
+    (
+      await loadPreparedModelCatalogSnapshot({
+        ...scopedParams,
+        scopedLiveProviderDiscovery: true,
+      })
+    ).entries,
+  );
+}
+
 /** Resolves the lifecycle owner for an exact caller-supplied config. */
 export async function loadPreparedModelCatalogOwnerSnapshot(
   params: LoadPreparedModelCatalogParams = {},
@@ -258,6 +346,9 @@ export async function loadResolvedPublishedModelCatalogOwner(
 export async function loadPreparedModelCatalogSnapshot(
   params: LoadPreparedModelCatalogParams = {},
 ): Promise<ModelCatalogSnapshot> {
+  if (params.readOnly && params.providerDiscoveryProviderIds) {
+    return loadScopedReadOnlyModelCatalog(params);
+  }
   return (await loadPreparedModelCatalogOwnerSnapshot(params)).modelCatalog;
 }
 
