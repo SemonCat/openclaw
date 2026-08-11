@@ -104,7 +104,7 @@ Required behavior when ACP backend is unavailable:
 
 1. Do not immediately ask the user to pick an alternate path.
 2. First attempt automatic local repair:
-   - ensure plugin-local pinned acpx is installed in the ACPX plugin package
+   - ensure the ACPX plugin can resolve its pinned `acpx` dependency
    - verify `${ACPX_CMD} --version`
 3. After reinstall/repair, restart the gateway and explicitly offer to run that restart for the user.
 4. Retry ACP thread spawn once after repair.
@@ -121,14 +121,18 @@ Do not default to subagent runtime for these requests.
 
 For this repo, direct `acpx` calls must follow the same pinned policy as the `@openclaw/acpx` extension package.
 
-1. Prefer plugin-local binary, not global PATH:
-   - `${ACPX_PLUGIN_ROOT}/node_modules/.bin/acpx`
+1. Resolve the binary from the ACPX plugin package, not global PATH. Dependency
+   layout may be plugin-local in packaged installs or workspace-hoisted in a
+   source checkout.
 2. Resolve pinned version from extension dependency:
    - `node -e "console.log(require(process.env.ACPX_PLUGIN_ROOT + '/package.json').dependencies.acpx)"`
-3. If binary is missing or version mismatched, install plugin-local pinned version:
-   - `cd "$ACPX_PLUGIN_ROOT" && npm install --omit=dev --no-save acpx@<pinnedVersion>`
+3. If the dependency is missing or version mismatched:
+   - source checkout: run `pnpm install --filter ./extensions/acpx` from the
+     OpenClaw repo root
+   - packaged plugin: run
+     `cd "$ACPX_PLUGIN_ROOT" && npm install --omit=dev --no-save acpx@<pinnedVersion>`
 4. Verify before use:
-   - `${ACPX_PLUGIN_ROOT}/node_modules/.bin/acpx --version`
+   - `${ACPX_CMD} --version`
 5. If install/repair changed ACPX artifacts, restart the gateway and offer to run the restart.
 6. Do not run `npm install -g acpx` unless the user explicitly asks for global install.
 
@@ -136,7 +140,14 @@ Set and reuse:
 
 ```bash
 ACPX_PLUGIN_ROOT="<bundled-acpx-plugin-root>"
-ACPX_CMD="$ACPX_PLUGIN_ROOT/node_modules/.bin/acpx"
+ACPX_CMD="$(node -e '
+  const path = require("node:path");
+  const { createRequire } = require("node:module");
+  const packageJson = createRequire(path.join(process.argv[1], "package.json"))
+    .resolve("acpx/package.json");
+  const binName = process.platform === "win32" ? "acpx.cmd" : "acpx";
+  process.stdout.write(path.join(path.dirname(path.dirname(packageJson)), ".bin", binName));
+' "$ACPX_PLUGIN_ROOT")"
 ```
 
 ## Direct acpx path ("telephone game")
@@ -167,13 +178,13 @@ Persistent session (create if missing, then prompt):
 ${ACPX_CMD} codex sessions show oc-codex-<conversationId> \
   || ${ACPX_CMD} codex sessions new --name oc-codex-<conversationId>
 
-${ACPX_CMD} codex -s oc-codex-<conversationId> --cwd <workspacePath> --format quiet "<prompt>"
+${ACPX_CMD} --cwd <workspacePath> --format quiet codex -s oc-codex-<conversationId> "<prompt>"
 ```
 
 One-shot:
 
 ```bash
-${ACPX_CMD} codex exec --cwd <workspacePath> --format quiet "<prompt>"
+${ACPX_CMD} --cwd <workspacePath> --format quiet codex exec "<prompt>"
 ```
 
 Cancel in-flight turn:
@@ -209,8 +220,8 @@ ${ACPX_CMD} codex sessions close oc-codex-<conversationId>
 Defaults are:
 
 - `openclaw -> openclaw acp`
-- `claude -> bundled @agentclientprotocol/claude-agent-acp@0.55.0`
-- `codex -> bundled @agentclientprotocol/codex-acp@1.1.2 through OpenClaw's isolated CODEX_HOME wrapper`
+- `claude -> bundled @agentclientprotocol/claude-agent-acp version pinned by @openclaw/acpx`
+- `codex -> bundled @agentclientprotocol/codex-acp version pinned by @openclaw/acpx through OpenClaw's isolated CODEX_HOME wrapper`
 - `copilot -> copilot --acp --stdio`
 - `cursor -> cursor-agent acp`
 - `droid -> droid exec --output-format acp`
@@ -228,7 +239,7 @@ If your local Cursor install still exposes ACP as `agent acp`, set that as the `
 ### Failure handling
 
 - `acpx: command not found`:
-  - for thread-spawn ACP requests, install plugin-local pinned acpx in the ACPX plugin package immediately
+  - for thread-spawn ACP requests, restore the ACPX plugin's pinned `acpx` dependency immediately
   - restart gateway after install and offer to run the restart automatically
   - then retry once
   - do not ask for install permission first unless policy explicitly requires it
