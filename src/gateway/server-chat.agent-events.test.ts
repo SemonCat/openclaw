@@ -2741,6 +2741,43 @@ describe("agent event handler", () => {
     });
   });
 
+  it("resolves restart recovery only for recovery lifecycle phases", () => {
+    const { broadcast, chatRunState, handler } = createHarness({
+      resolveSessionKeyForRun: () => "session-recovery-lazy",
+    });
+    registerChatRun(chatRunState, "run-lazy", "session-recovery-lazy", "client-lazy");
+    vi.mocked(loadSessionEntry).mockClear();
+
+    for (let seq = 1; seq <= 5; seq++) {
+      emitAgentEvent(
+        handler,
+        "run-lazy",
+        "assistant",
+        { text: `message ${seq}` },
+        { seq, ts: Date.now() + seq * 200 },
+      );
+    }
+    expect(loadSessionEntry).not.toHaveBeenCalled();
+    expect(chatBroadcastCalls(broadcast).length).toBeGreaterThanOrEqual(1);
+
+    emitFallbackLifecycle({
+      handler,
+      runId: "run-lazy",
+      seq: 6,
+      sessionKey: "session-recovery-lazy",
+    });
+    expect(loadSessionEntry).not.toHaveBeenCalled();
+
+    emitAgentEvent(
+      handler,
+      "run-lazy",
+      "lifecycle",
+      { phase: "end", endedAt: Date.now() },
+      { seq: 7, sessionKey: "session-recovery-lazy" },
+    );
+    expect(loadSessionEntry).toHaveBeenCalled();
+  });
+
   it("reloads canonical state when a restart marker races terminal persistence", async () => {
     mockSessionEntry(
       {

@@ -1405,9 +1405,16 @@ export function createAgentEventHandler({
       isChatAbortMarkerCurrent(chatRunState.runs.get(clientRunId)?.abortMarker, chatLink) ||
       isChatAbortMarkerCurrent(chatRunState.runs.get(evt.runId)?.abortMarker, chatLink);
 
-    const restartRecoveryState = restartRecoverySessionKey
-      ? resolveRestartRecoveryLifecycleState(restartRecoverySessionKey, restartRecoveryAgentId, evt)
-      : undefined;
+    // Only recovery lifecycle phases consume this state; other events stay off the session store.
+    const restartRecoveryState =
+      (lifecyclePhase === "start" || lifecyclePhase === "end" || lifecyclePhase === "error") &&
+      restartRecoverySessionKey
+        ? resolveRestartRecoveryLifecycleState(
+            restartRecoverySessionKey,
+            restartRecoveryAgentId,
+            evt,
+          )
+        : undefined;
     const suppressRestartRecoveryLifecycle =
       lifecyclePhase !== null &&
       (Boolean(
