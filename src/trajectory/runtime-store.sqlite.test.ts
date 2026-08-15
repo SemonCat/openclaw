@@ -35,6 +35,7 @@ describe("SQLite trajectory runtime store", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.unstubAllEnvs();
     closeOpenClawAgentDatabasesForTest();
     closeOpenClawStateDatabaseForTest();
     fs.rmSync(tempDir, { recursive: true, force: true });
@@ -245,6 +246,41 @@ describe("SQLite trajectory runtime store", () => {
       createTrajectoryEvent({ type: "next-window", ts: new Date(Date.now()).toISOString() }),
     ]);
     await expect(runtimeEventTypes("old-session")).resolves.toEqual([]);
+  });
+
+  it("skips payload retention scans in local fast-open mode", async () => {
+    const now = Date.parse("2026-07-26T00:00:00.000Z");
+    vi.useFakeTimers();
+    vi.setSystemTime(now);
+    vi.stubEnv("OPENCLAW_FAST_AGENT_DB_OPEN", "1");
+    appendSqliteTrajectoryRuntimeEvents({ maxRuntimeBytes: 1, sessionId: "session-1", storePath }, [
+      createTrajectoryEvent({ type: "current-1" }),
+      createTrajectoryEvent({ type: "current-2" }),
+    ]);
+    await addSession("old-session");
+    appendSqliteTrajectoryRuntimeEvents(
+      { maxRuntimeBytes: 1, sessionId: "old-session", storePath },
+      [
+        createTrajectoryEvent({
+          sessionId: "old-session",
+          type: "old",
+          ts: new Date(now - 15 * 24 * 60 * 60 * 1_000).toISOString(),
+        }),
+      ],
+    );
+
+    vi.advanceTimersByTime(60 * 60 * 1_000);
+    appendSqliteTrajectoryRuntimeEvents(
+      { maxGlobalRuntimeBytes: 1, maxRuntimeBytes: 1, sessionId: "session-1", storePath },
+      [createTrajectoryEvent({ type: "sweep-trigger", ts: new Date(Date.now()).toISOString() })],
+    );
+
+    await expect(runtimeEventTypes("session-1")).resolves.toEqual([
+      "current-1",
+      "current-2",
+      "sweep-trigger",
+    ]);
+    await expect(runtimeEventTypes("old-session")).resolves.toEqual(["old"]);
   });
 
   it("cascades trajectory rows when the session row is deleted", async () => {

@@ -3,7 +3,7 @@ import { stripAnsi } from "../../../../packages/terminal-core/src/ansi.js";
 import type { OpenClawConfig } from "../../../config/types.openclaw.js";
 import type { PluginInstallRecord } from "../../../config/types.plugins.js";
 import type { ClawHubRiskAcknowledgementRequest } from "../../../plugins/clawhub.js";
-import { writePersistedInstalledPluginIndexInstallRecords } from "../../../plugins/installed-plugin-index-records.js";
+import { commitPluginInstallRecordsOnly } from "../../../plugins/install-record-commit.js";
 import { updateNpmInstalledPlugins } from "../../../plugins/update.js";
 import { resolveUserPath } from "../../../utils.js";
 import { resolveCompatibilityHostVersion } from "../../../version.js";
@@ -377,16 +377,25 @@ async function repairMissingPluginInstalls(params: {
     }
   }
 
-  const persistedIndexOptions = { config: params.cfg, env };
   if (nextRecords !== records) {
-    await writePersistedInstalledPluginIndexInstallRecords(nextRecords, persistedIndexOptions);
+    await commitPluginInstallRecordsOnly({
+      previousInstallRecords: records,
+      nextInstallRecords: nextRecords,
+      nextConfig: params.cfg,
+      env,
+    });
   } else if (params.baselineRecords) {
     // The caller seeded us from in-memory state that may not yet have been
     // persisted (e.g. earlier sync/npm record mutations). Even if repair
     // itself made no further changes, persist the baseline so the disk
     // matches what we are about to return — otherwise the next reader gets
     // a stale snapshot.
-    await writePersistedInstalledPluginIndexInstallRecords(nextRecords, persistedIndexOptions);
+    await commitPluginInstallRecordsOnly({
+      previousInstallRecords: records,
+      nextInstallRecords: nextRecords,
+      nextConfig: params.cfg,
+      env,
+    });
   }
   const pluginInventoryChanged = nextRecords !== records || repairedPluginIds.size > 0;
   return {
