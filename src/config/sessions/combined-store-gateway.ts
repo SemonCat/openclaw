@@ -381,7 +381,6 @@ export function loadCombinedSessionStoreForGatewayCore(
   // prewarm can approve one database and synchronously materialize another.
   const {
     configuredAgentIds,
-    defaultAgentId,
     diagnostics,
     durableStorePath: preparedDurableStorePath,
     durableTargets,
