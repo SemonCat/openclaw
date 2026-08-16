@@ -44,11 +44,17 @@ function adoptPersistedHostPrompt(params: {
   settledMessages: readonly AgentMessage[];
   turnId: string;
 }): { historyMessages: readonly AgentMessage[]; mirroredMessages: readonly AgentMessage[] } {
-  const promptIdentity = `${params.turnId}:prompt`;
+  // Restart recovery opens a successor Codex turn while retaining the exact
+  // prompt from the interrupted turn. Use that attested prompt identity rather
+  // than requiring it to be minted from the successor turn id.
+  const sourcePrompt = params.settledMessages[0];
+  const promptIdentity = sourcePrompt ? readMirrorIdentity(sourcePrompt) : undefined;
+  if (!promptIdentity?.endsWith(":prompt")) {
+    return params;
+  }
   if (params.mirroredMessages.some((message) => readMirrorIdentity(message) === promptIdentity)) {
     return params;
   }
-  const sourcePrompt = params.settledMessages[0];
   const sourceKey = (sourcePrompt as { idempotencyKey?: unknown } | undefined)?.idempotencyKey;
   if (
     sourcePrompt?.role !== "user" ||
@@ -126,7 +132,8 @@ function buildCodexSettledTurnFinalizationContext(params: {
     requiredIdentities.length === 0 ||
     requiredIdentities.some((identity) => !identity) ||
     new Set(requiredIdentities).size !== requiredIdentities.length ||
-    !requiredIdentities.includes(`${params.turnId}:prompt`)
+    params.settledMessages[0]?.role !== "user" ||
+    !requiredIdentities[0]?.endsWith(":prompt")
   ) {
     return undefined;
   }

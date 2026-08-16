@@ -24,6 +24,7 @@ import { waitForReplyDispatcherIdle } from "./reply-dispatcher.js";
 import type { ReplyDispatcher } from "./reply-dispatcher.types.js";
 import {
   forceClearReplyRunBySessionId,
+  isReplyRunEvidenceStale,
   replyRunRegistry,
   type ReplyOperation,
   waitForReplyBarrierSettlement,
@@ -33,6 +34,7 @@ import {
   resolveReplyTurnKind,
   runWithReplyOperationLifecycleAdmission,
 } from "./reply-turn-admission.js";
+import { readChannelSourceTurnId } from "./source-turn-id.js";
 
 type DispatchReplyOperationAcquisition =
   | { status: "ready" }
@@ -265,6 +267,7 @@ export function createDispatchReplyOperationCoordinator(params: {
       replyTurnKind === "visible" &&
       params.replyOptions?.turnAdoptionLifecycle !== undefined &&
       activeReplyOperation !== undefined &&
+      !isReplyRunEvidenceStale(activeReplyOperation) &&
       activeReplyOperation.turnKind !== "heartbeat";
     if (allowGatewayQueueResolution) {
       // Gateway turns need to reach getReplyFromConfig while the owner is active;
@@ -294,6 +297,7 @@ export function createDispatchReplyOperationCoordinator(params: {
       resetTriggered: false,
       routeThreadId: params.routeThreadId,
       originatingLeafEntryId: params.replyOptions?.turnAdoptionLifecycle?.originatingLeafEntryId,
+      sourceTurnId: readChannelSourceTurnId(params.ctx),
       upstreamAbortSignal: params.replyOptions?.abortSignal,
       waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
       retainLifecycleAdmissionOnActive: allowActivePreDispatch || allowSlackRoutedThreadBypass,
@@ -342,6 +346,7 @@ export function createDispatchReplyOperationCoordinator(params: {
           routeThreadId: params.routeThreadId,
           originatingLeafEntryId:
             params.replyOptions?.turnAdoptionLifecycle?.originatingLeafEntryId,
+          sourceTurnId: readChannelSourceTurnId(params.ctx),
           upstreamAbortSignal: params.replyOptions?.abortSignal,
           waitForActive: !allowActivePreDispatch && !allowSlackRoutedThreadBypass,
           retainLifecycleAdmissionOnActive: allowActivePreDispatch || allowSlackRoutedThreadBypass,
