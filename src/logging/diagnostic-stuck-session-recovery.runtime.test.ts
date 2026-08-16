@@ -11,6 +11,7 @@ import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 const mocks = vi.hoisted(() => ({
   abortEmbeddedAgentRun: vi.fn(),
   forceClearEmbeddedAgentRun: vi.fn(),
+  isReplyRunEvidenceStaleBySessionId: vi.fn(),
   isEmbeddedAgentRunActive: vi.fn(),
   isEmbeddedAgentRunHandleActive: vi.fn(),
   getCommandLaneActiveTaskIds: vi.fn(),
@@ -66,6 +67,10 @@ vi.mock("../agents/embedded-agent-runner/lanes.js", () => ({
   resolveEmbeddedSessionLane: mocks.resolveEmbeddedSessionLane,
 }));
 
+vi.mock("../auto-reply/reply/reply-run-registry.js", () => ({
+  isReplyRunEvidenceStaleBySessionId: mocks.isReplyRunEvidenceStaleBySessionId,
+}));
+
 vi.mock("../process/command-queue.js", () => ({
   getCommandLaneActiveTaskIds: mocks.getCommandLaneActiveTaskIds,
   getCommandLaneSnapshot: mocks.getCommandLaneSnapshot,
@@ -85,6 +90,8 @@ import { recoverStuckDiagnosticSession } from "./diagnostic-stuck-session-recove
 function resetMocks() {
   mocks.abortEmbeddedAgentRun.mockReset();
   mocks.forceClearEmbeddedAgentRun.mockReset();
+  mocks.isReplyRunEvidenceStaleBySessionId.mockReset();
+  mocks.isReplyRunEvidenceStaleBySessionId.mockReturnValue(false);
   mocks.isEmbeddedAgentRunActive.mockReset();
   mocks.isEmbeddedAgentRunHandleActive.mockReset();
   mocks.getCommandLaneSnapshot.mockReset();
@@ -487,6 +494,31 @@ describe("stuck session recovery", () => {
     ]);
   });
 
+  it("reclaims stale reply ownership when unrelated session activity stays fresh", async () => {
+    mocks.resolveActiveEmbeddedRunSessionId.mockReturnValue("stale-reply-session");
+    mocks.resolveActiveEmbeddedRunHandleSessionId.mockReturnValue(undefined);
+    mocks.isEmbeddedAgentRunActive.mockReturnValue(true);
+    mocks.isEmbeddedAgentRunHandleActive.mockReturnValue(false);
+    mocks.isReplyRunEvidenceStaleBySessionId.mockReturnValue(true);
+    mocks.getDiagnosticSessionActivitySnapshot.mockReturnValue({ lastProgressAgeMs: 1_000 });
+    mocks.abortEmbeddedAgentRun.mockReturnValue(true);
+    mocks.waitForEmbeddedAgentRunEnd.mockResolvedValue(true);
+
+    const outcome = await recoverStuckDiagnosticSession({
+      sessionId: "stale-reply-session",
+      sessionKey: "agent:main:mattermost:channel:vision:thread:camera",
+      ageMs: 12 * 60_000,
+      queueDepth: 1,
+    });
+
+    expect(mocks.abortEmbeddedAgentRun).toHaveBeenCalledWith("stale-reply-session");
+    expect(outcome).toMatchObject({
+      status: "aborted",
+      action: "abort_embedded_run",
+      activeSessionId: "stale-reply-session",
+    });
+  });
+
   it.each(["preflight_compacting", "memory_flushing"])(
     "keeps zero-backlog maintenance phase %s out of the stale reclaim path",
     async (phase) => {
@@ -495,6 +527,7 @@ describe("stuck session recovery", () => {
       mocks.isEmbeddedAgentRunActive.mockReturnValue(true);
       mocks.isEmbeddedAgentRunHandleActive.mockReturnValue(false);
       mocks.resolveEmbeddedAgentReplyRunPhase.mockReturnValue(phase);
+      mocks.isReplyRunEvidenceStaleBySessionId.mockReturnValue(true);
       mocks.getDiagnosticSessionActivitySnapshot.mockReturnValue({
         lastProgressAgeMs: 720_000,
       });

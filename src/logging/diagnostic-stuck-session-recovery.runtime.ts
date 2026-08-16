@@ -10,6 +10,7 @@ import {
   resolveActiveEmbeddedRunHandleSessionId,
   resolveActiveEmbeddedRunHandleSessionIdBySessionFile,
 } from "../agents/embedded-agent-runner/runs.js";
+import { isReplyRunEvidenceStaleBySessionId } from "../auto-reply/reply/reply-run-registry.js";
 import {
   getCommandLaneActiveTaskIds,
   getCommandLaneSnapshot,
@@ -249,27 +250,29 @@ export async function recoverStuckDiagnosticSession(
         diag.warn(`stuck session recovery outcome: ${formatRecoveryOutcome(outcome)}`);
         return outcome;
       }
+      const isDeferredMaintenanceActive =
+        activeReplyPhase === "preflight_compacting" || activeReplyPhase === "memory_flushing";
+      const hasQueuedSessionWork = (params.queueDepth ?? 0) > 0;
       const reclaimStaleReplyWork =
         params.allowActiveAbort !== true &&
-        isActiveRunProgressStale({
-          ageMs: params.ageMs,
-          sessionId: activeWorkSessionId,
-          sessionKey: params.sessionKey,
-          queueDepth: params.queueDepth,
-          staleAbortMs: staleActiveProgressAbortMs,
-          // Reply-only ownership must expire when proven stale even with zero
-          // queued backlog; the queue gate exists to protect run handles that
-          // are actively draining queued turns, and there is no such backlog
-          // here to protect. Recognized maintenance phases are the exception:
-          // preflight compaction and memory flush are explicitly allowed to
-          // run longer than the stale threshold (they honor a configured
-          // compaction timeout), so they keep the queue-backlog guard and are
-          // never force-cleared early by this reclaim path.
-          requireQueueBacklog:
-            activeReplyPhase === "preflight_compacting" || activeReplyPhase === "memory_flushing"
-              ? undefined
-              : false,
-        });
+        (((!isDeferredMaintenanceActive || hasQueuedSessionWork) &&
+          isReplyRunEvidenceStaleBySessionId(activeWorkSessionId)) ||
+          isActiveRunProgressStale({
+            ageMs: params.ageMs,
+            sessionId: activeWorkSessionId,
+            sessionKey: params.sessionKey,
+            queueDepth: params.queueDepth,
+            staleAbortMs: staleActiveProgressAbortMs,
+            // Reply-only ownership must expire when proven stale even with zero
+            // queued backlog; the queue gate exists to protect run handles that
+            // are actively draining queued turns, and there is no such backlog
+            // here to protect. Recognized maintenance phases are the exception:
+            // preflight compaction and memory flush are explicitly allowed to
+            // run longer than the stale threshold (they honor a configured
+            // compaction timeout), so they keep the queue-backlog guard and are
+            // never force-cleared early by this fallback path.
+            requireQueueBacklog: isDeferredMaintenanceActive ? undefined : false,
+          }));
       if (params.allowActiveAbort === true || reclaimStaleReplyWork) {
         if (reclaimStaleReplyWork) {
           diag.warn(
