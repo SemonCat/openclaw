@@ -96,7 +96,6 @@ const DEFAULT_HUMAN_DELAY_MIN_MS = 800;
 const DEFAULT_HUMAN_DELAY_MAX_MS = 2500;
 const DEFAULT_BEFORE_DELIVER_TIMEOUT_MS = 15_000;
 const silentReplyLogger = createSubsystemLogger("silent-reply/dispatcher");
-const beforeDeliverCancelledHooks = new WeakMap<ReplyDispatcher, ReplyDispatchCancelHandler[]>();
 const deliveryOutcomeTrackers = new WeakMap<ReplyPayload, ReplyDispatchDeliveryOutcomeTracker>();
 const undeliveredFallbacks = new WeakMap<ReplyPayload, ReplyPayload>();
 const replyDispatcherPreparers = new WeakMap<
@@ -224,19 +223,6 @@ export function markReplyDispatchBeforeDeliverDeadlineOwned(
 ): ReplyDispatchBeforeDeliver {
   beforeDeliverStagesByHook.set(hook, [{ hook }]);
   return hook;
-}
-
-/** Adds a core-internal cancellation observer without expanding the plugin-facing dispatcher. */
-export function appendReplyDispatcherBeforeDeliverCancelled(
-  dispatcher: ReplyDispatcher,
-  hook: ReplyDispatchCancelHandler,
-): boolean {
-  const hooks = beforeDeliverCancelledHooks.get(dispatcher);
-  if (!hooks) {
-    return false;
-  }
-  hooks.push(hook);
-  return true;
 }
 
 /** Capture one core-dispatcher delivery outcome without changing send* return types. */
@@ -410,7 +396,6 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
       ? { hook: options.beforeDeliver, options: options.beforeDeliverOptions }
       : undefined,
   );
-  const appendedBeforeDeliverCancelledHooks: ReplyDispatchCancelHandler[] = [];
   let sendChain: Promise<void> = Promise.resolve();
   // Track in-flight deliveries so we can emit a reliable "idle" signal.
   // Start with pending=1 as a "reservation" to prevent premature gateway restart.
@@ -470,26 +455,24 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
     payload: ReplyPayload,
     info: ReplyDispatchRuntimeInfo,
   ) => {
-    const observers = [
-      ...(options.onBeforeDeliverCancelled ? [options.onBeforeDeliverCancelled] : []),
-      ...appendedBeforeDeliverCancelledHooks,
-    ];
-    for (const observer of observers) {
-      try {
-        await runReplyDispatchBeforeDeliverStage(
-          {
-            hook: async (current, currentInfo) => {
-              await observer(current, currentInfo);
-              return current;
-            },
-            timeoutMs: DEFAULT_BEFORE_DELIVER_TIMEOUT_MS,
+    const observer = options.onBeforeDeliverCancelled;
+    if (!observer) {
+      return;
+    }
+    try {
+      await runReplyDispatchBeforeDeliverStage(
+        {
+          hook: async (current, currentInfo) => {
+            await observer(current, currentInfo);
+            return current;
           },
-          payload,
-          info,
-        );
-      } catch (err: unknown) {
-        reportObserverError(err, info);
-      }
+          timeoutMs: DEFAULT_BEFORE_DELIVER_TIMEOUT_MS,
+        },
+        payload,
+        info,
+      );
+    } catch (err: unknown) {
+      reportObserverError(err, info);
     }
   };
 
@@ -721,7 +704,6 @@ export function createReplyDispatcher(options: ReplyDispatcherOptions): ReplyDis
     owner: dispatcher,
     normalize: (kind, payload) => normalizeForDispatch(kind, payload, true),
   });
-  beforeDeliverCancelledHooks.set(dispatcher, appendedBeforeDeliverCancelledHooks);
   return dispatcher;
 }
 
