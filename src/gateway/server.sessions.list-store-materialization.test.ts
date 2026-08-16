@@ -104,7 +104,7 @@ test("local fast-open mode keeps Gateway list reads on the process-held entry ca
   }
 });
 
-test("sessions.list discovers store targets at most once per agent", async () => {
+test("sessions.list reuses prepared store targets for sharing", async () => {
   await createSessionStoreDir();
   await writeSessionStore({
     entries: Object.fromEntries(
@@ -118,7 +118,7 @@ test("sessions.list discovers store targets at most once per agent", async () =>
   try {
     const result = await directSessionReq("sessions.list", LIST_PARAMS);
     expect(result.ok).toBe(true);
-    expect(discoverySpy.mock.calls.filter((call) => call[1] === "main")).toHaveLength(1);
+    expect(discoverySpy.mock.calls.filter((call) => call[1] === "main")).toHaveLength(0);
   } finally {
     discoverySpy.mockRestore();
   }
