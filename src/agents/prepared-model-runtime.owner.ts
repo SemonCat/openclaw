@@ -32,6 +32,7 @@ import type {
   PreparedModelRuntimeCatalogMode,
   PreparedModelRuntimeInput,
   PreparedModelRuntimeOwner,
+  PreparedModelRuntimePluginGeneration,
   PreparedModelRuntimeReplacement,
   PreparedModelRuntimeSnapshot,
 } from "./prepared-model-runtime.types.js";
@@ -150,20 +151,27 @@ export function hasConfiguredOwnerMatching(
   return findConfiguredOwnerCandidates(owners, rawInput).length > 0;
 }
 
+export function resolveCommittedConfiguredOwner(
+  owners: Map<string, PreparedModelRuntimeOwner>,
+  rawInput: PreparedModelRuntimeInput,
+): PreparedModelRuntimeOwner | undefined {
+  const candidates = findConfiguredOwnerCandidates(owners, rawInput).filter(
+    (owner) => owner.snapshot && !owner.needsRefresh && !owner.pending,
+  );
+  return candidates.length === 1 ? candidates[0] : undefined;
+}
+
 export function rebindInputToCommittedConfiguredOwner(
   owners: Map<string, PreparedModelRuntimeOwner>,
   rawInput: PreparedModelRuntimeInput,
 ): PreparedModelRuntimeInput {
   const input = normalizePreparedModelRuntimeInput(rawInput);
-  const candidates = findConfiguredOwnerCandidates(owners, rawInput).filter(
-    (owner) => owner.snapshot && !owner.needsRefresh && !owner.pending,
-  );
-  if (candidates.length !== 1) {
+  const owner = resolveCommittedConfiguredOwner(owners, rawInput);
+  if (!owner) {
     throw new PreparedModelRuntimeOwnerNotPublishedError(
       `prepared model runtime owner was not committed after replacement for ${input.agentDir}`,
     );
   }
-  const owner = candidates[0]!;
   const preserveWorkspaceDir =
     input.preserveWorkspaceDirOnRefresh === true && input.workspaceDir !== undefined;
   // Reserved execution identities (for example setup's `openclaw` agent) intentionally borrow a
@@ -570,6 +578,7 @@ export async function publishModelRuntimeSnapshot(
   existing?: PreparedModelRuntimeOwner,
   provenance: PreparedModelRuntimeOwner["provenance"] = "explicit",
   catalogMode: PreparedModelRuntimeCatalogMode = existing?.catalogMode ?? "live",
+  reusablePluginGeneration?: PreparedModelRuntimePluginGeneration,
 ): Promise<PreparedModelRuntimeSnapshot> {
   const key = ownerKey(input);
   const owner = existing ?? createPreparedModelRuntimeOwner(input, provenance, catalogMode);
@@ -589,6 +598,7 @@ export async function publishModelRuntimeSnapshot(
     catalogMode,
     () => owner.generation === generation && owners.get(key) === owner,
     provenance === "configured",
+    reusablePluginGeneration,
   );
   owner.buildCompletion = build.completion;
   void build.completion.then(() => {
