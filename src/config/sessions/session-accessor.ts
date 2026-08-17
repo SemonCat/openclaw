@@ -148,6 +148,7 @@ export {
   patchSessionEntryTarget,
   patchSessionEntryWithKey,
   readSessionUpdatedAtCore,
+  readRecentSessionEntrySnapshotReadOnly,
   replaceSessionEntry,
   replaceSessionEntrySync,
   resolveSessionEntryAccessTarget,
@@ -156,6 +157,7 @@ export {
   updateResolvedSessionEntry,
   upsertSessionEntryCore,
 } from "./session-accessor.entry.js";
+export type { RecentSessionEntrySnapshot } from "./session-accessor.entry.js";
 export {
   readSessionIdentityEvidenceBatch,
   type SessionIdentityEvidenceResult,

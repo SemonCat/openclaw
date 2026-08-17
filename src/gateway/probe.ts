@@ -428,6 +428,7 @@ export async function probeGateway(opts: {
       tlsFingerprint: opts.tlsFingerprint,
       preauthHandshakeTimeoutMs: opts.preauthHandshakeTimeoutMs,
       env: opts.env,
+      sharedStateMode: "read-only",
       scopes: [READ_SCOPE],
       clientName: GATEWAY_CLIENT_NAMES.CLI,
       clientVersion: "dev",

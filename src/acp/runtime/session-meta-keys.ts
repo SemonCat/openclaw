@@ -36,6 +36,32 @@ export function selectAcpSessionRow(
   );
 }
 
+export function selectAcpSessionRowsByKeys(
+  db: DatabaseSync,
+  sessionKeys: readonly string[],
+): AcpSessionRow[] {
+  const tableExists = db
+    .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'acp_sessions'")
+    .get();
+  if (!tableExists) {
+    return [];
+  }
+  const kysely = getAcpSessionKysely(db);
+  const rows: AcpSessionRow[] = [];
+  for (let index = 0; index < sessionKeys.length; index += 500) {
+    rows.push(
+      ...executeSqliteQuerySync(
+        db,
+        kysely
+          .selectFrom("acp_sessions")
+          .selectAll()
+          .where("session_key", "in", sessionKeys.slice(index, index + 500)),
+      ).rows,
+    );
+  }
+  return rows;
+}
+
 const ACP_DATABASE_KEY_PREFIX = "@acp:v1:";
 const ACP_LEGACY_AGENT_SCOPED_DB_KEY_PREFIX = "@agent:";
 
@@ -166,6 +192,7 @@ export function resolveReadableAcpSessionRow(params: {
   entry: AcpSessionEntryBinding | undefined;
   env?: NodeJS.ProcessEnv;
   databasePath?: string;
+  migrateLifecycleRevision?: boolean;
 }): AcpSessionRow | undefined {
   const { row, entry } = params;
   if (!row || !acpSessionRowMatchesEntry(row, entry)) {
@@ -180,6 +207,9 @@ export function resolveReadableAcpSessionRow(params: {
     row.session_id === lifecycleRevision
   ) {
     return row;
+  }
+  if (params.migrateLifecycleRevision === false) {
+    return { ...row, session_id: lifecycleRevision };
   }
   return runOpenClawStateWriteTransaction(
     (database) => {

@@ -6,7 +6,7 @@ import {
   normalizeOptionalString,
   normalizeOptionalLowercaseString,
 } from "@openclaw/normalization-core/string-coerce";
-import { readAcpSessionMeta } from "../acp/runtime/session-meta.js";
+import { readAcpSessionMetaBatch } from "../acp/runtime/session-meta.js";
 import { resolveCurrentSessionAgentRuntimeMetadata } from "../agents/agent-runtime-metadata.js";
 import { resolveAgentConfig } from "../agents/agent-scope-config.js";
 import { resolveConfiguredProviderFallback } from "../agents/configured-provider-fallback.js";
@@ -202,6 +202,7 @@ function resolveSessionRuntime(params: {
   model: string;
   agentId?: string;
   sessionKey: string;
+  acpMeta?: import("../config/sessions/types.js").SessionAcpMeta;
 }): { id: string | undefined; label: string } {
   const acpSessionKey = params.agentId
     ? resolveStoredSessionKeyForAgentStore({
@@ -210,7 +211,7 @@ function resolveSessionRuntime(params: {
         sessionKey: params.sessionKey,
       })
     : params.sessionKey;
-  const acpMeta = readAcpSessionMeta({ cfg: params.cfg, sessionKey: acpSessionKey });
+  const acpMeta = params.acpMeta;
   const runtime = resolveCurrentSessionAgentRuntimeMetadata({
     cfg: params.cfg,
     agentId: params.agentId ?? "",
@@ -235,6 +236,13 @@ function resolveSessionRuntime(params: {
   };
 }
 
+function resolveAcpSessionMetaBatch(params: {
+  cfg: OpenClawConfig;
+  entries: ReadonlyArray<{ sessionKey: string; agentId?: string; entry: SessionEntry }>;
+}) {
+  return readAcpSessionMetaBatch({ ...params, readOnly: true });
+}
+
 export const statusSummaryRuntime = {
   waitForContextWindowCacheLoad,
   resolveAuthoredModelContextTokens,
@@ -242,6 +250,7 @@ export const statusSummaryRuntime = {
   classifySessionKey: classifySessionKind,
   resolveSessionModelRef,
   resolveSessionRuntime,
+  resolveAcpSessionMetaBatch,
   resolveConfiguredStatusModelRef,
   resolveStatusModelLookupRef,
   resolveStatusModelComparisonLabel,
