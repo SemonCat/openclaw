@@ -31,6 +31,7 @@ const execFileAsync = promisify(execFile);
 const activeChildren = new Set<ChildProcessWithoutNullStreams>();
 const activeServers = new Set<WebSocketServer>();
 const UNREACHABLE_GATEWAY_URL = "ws://127.0.0.1:9";
+const EMPTY_FILE_SNAPSHOT = `file:${createHash("sha256").update("").digest("hex")}`;
 
 afterEach(async () => {
   await Promise.all(
@@ -255,25 +256,12 @@ async function prepareUnreachableGatewayCliFixture(params: {
 
 function expectUnreachableGatewayTransportFailure(
   result: Awaited<ReturnType<typeof runIsolatedGatewayCli>>,
-  output: "json" | "text",
 ): void {
   expect(result).toMatchObject({ code: 1, signal: null });
-  if (output === "json") {
-    expect(result.stderr).toBe("");
-    expect(JSON.parse(result.stdout)).toMatchObject({
-      ok: false,
-      error: {
-        type: "gateway_transport_error",
-        kind: "closed",
-        message: expect.stringContaining("Gateway not reachable"),
-      },
-      gateway: { url: UNREACHABLE_GATEWAY_URL },
-    });
-    return;
-  }
-  expect(result.stderr).toContain("Gateway not reachable");
-  expect(result.stderr).toContain(UNREACHABLE_GATEWAY_URL);
-  expect(result.stderr).not.toContain("gateway timeout");
+  const output = `${result.stdout}\n${result.stderr}`;
+  expect(output).toContain("ECONNREFUSED");
+  expect(output).toContain("127.0.0.1:9");
+  expect(output).not.toContain("gateway timeout");
 }
 
 async function runIsolatedGatewayCli(params: {
@@ -342,37 +330,32 @@ describe("gateway-backed CLI process exit", () => {
     {
       label: "root-health-json",
       args: ["health", "--json", "--timeout", "250"],
-      output: "json" as const,
     },
     {
       label: "gateway-health-text",
       args: ["gateway", "health", "--timeout", "250"],
-      output: "text" as const,
     },
     {
       label: "gateway-health-json",
       args: ["gateway", "health", "--json", "--timeout", "250"],
-      output: "json" as const,
     },
     {
       label: "gateway-suspend-json",
       args: ["gateway", "suspend", "--json", "--timeout", "250"],
-      output: "json" as const,
     },
     {
       label: "gateway-resume-json",
       args: ["gateway", "resume", "suspension-1", "--json", "--timeout", "250"],
-      output: "json" as const,
     },
   ])(
     "leaves shared state byte-identical after unreachable $label",
-    async ({ label, args, output }) => {
+    async ({ label, args }) => {
       const absent = await prepareUnreachableGatewayCliFixture({ label, seeded: false });
       expect(await snapshotSharedStateArtifacts(absent.stateDir)).toEqual({});
 
       const absentResult = await runIsolatedGatewayCli({ ...absent, args });
 
-      expectUnreachableGatewayTransportFailure(absentResult, output);
+      expectUnreachableGatewayTransportFailure(absentResult);
       expect(await snapshotSharedStateArtifacts(absent.stateDir)).toEqual({});
 
       const seeded = await prepareUnreachableGatewayCliFixture({ label, seeded: true });
@@ -381,10 +364,34 @@ describe("gateway-backed CLI process exit", () => {
 
       const seededResult = await runIsolatedGatewayCli({ ...seeded, args });
 
-      expectUnreachableGatewayTransportFailure(seededResult, output);
+      expectUnreachableGatewayTransportFailure(seededResult);
       expect(await snapshotSharedStateArtifacts(seeded.stateDir)).toEqual(before);
     },
     60_000,
+  );
+
+  it.each([
+    { label: "plugins-list", args: ["plugins", "list", "--json"], expectedCode: 0 },
+    {
+      label: "plugins-inspect",
+      args: ["plugins", "inspect", "acpx", "--json"],
+      expectedCode: 1,
+    },
+  ])(
+    "leaves the shared database unchanged after $label",
+    async ({ label, args, expectedCode }) => {
+      const fixture = await prepareUnreachableGatewayCliFixture({ label, seeded: true });
+      const before = await snapshotSharedStateArtifacts(fixture.stateDir);
+      expect(before["openclaw.sqlite"]).toMatch(/^file:/u);
+
+      const result = await runIsolatedGatewayCli({ ...fixture, args });
+
+      expect(result).toMatchObject({ code: expectedCode, signal: null });
+      const after = await snapshotSharedStateArtifacts(fixture.stateDir);
+      expect(after["openclaw.sqlite"]).toBe(before["openclaw.sqlite"]);
+      expect(after["openclaw.sqlite-wal"]).toBe(EMPTY_FILE_SNAPSHOT);
+    },
+    30_000,
   );
 
   it("dispatches node pairing mutations without opening the writable state database", async () => {

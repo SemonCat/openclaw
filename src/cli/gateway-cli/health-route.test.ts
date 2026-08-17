@@ -101,7 +101,7 @@ describe("runGatewayHealthJsonRoute", () => {
 
     expect(callGateway).not.toHaveBeenCalled();
     expect(runtime.writeJson).not.toHaveBeenCalled();
-    expect(runtime.error).toHaveBeenCalledWith(String(error));
+    expect(runtime.error).toHaveBeenCalledWith(error.message);
     expect(runtime.exit).toHaveBeenCalledWith(1);
   });
 

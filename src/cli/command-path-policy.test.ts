@@ -390,6 +390,11 @@ describe("command-path-policy", () => {
       loadPlugins: "never",
       networkProxy: "bypass",
     });
+    expectResolvedPolicy(["plugins", "inspect"], {
+      configGuard: "validate",
+      loadPlugins: "never",
+      networkProxy: "bypass",
+    });
     for (const commandPath of [["tasks"], ["tasks", "list"], ["tasks", "audit"]]) {
       expectResolvedPolicy(commandPath, {
         configGuard: "skip",
@@ -400,7 +405,6 @@ describe("command-path-policy", () => {
     }
     for (const commandPath of [
       ["plugins", "install"],
-      ["plugins", "inspect"],
       ["plugins", "registry"],
       ["plugins", "doctor"],
     ]) {
