@@ -133,6 +133,7 @@ const callGatewayCli = async (
     label: `Devices ${method}`,
     defaultTimeoutMs: DEFAULT_DEVICES_TIMEOUT_MS,
     scopes: callOpts?.scopes,
+    sharedStateMode: "read-only",
   });
 
 function isPendingNodeApprovalState(
