@@ -5,6 +5,7 @@ import {
   executeSqliteQueryTakeFirstSync,
   getNodeSqliteKysely,
 } from "../infra/kysely-sync.js";
+import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
 import {
   openOpenClawStateDatabase,
@@ -49,20 +50,23 @@ function ensureRemoteModelCatalogSchema(options: OpenClawStateDatabaseOptions = 
   ensuredDatabases.add(database.db);
 }
 
-function openDatabase(options: OpenClawStateDatabaseOptions) {
-  ensureRemoteModelCatalogSchema(options);
-  return openOpenClawStateDatabase(options);
-}
-
 export function readRemoteModelCatalog(
   options: OpenClawStateDatabaseOptions = {},
 ): RemoteModelCatalogStoreRow | undefined {
-  const state = openDatabase(options);
-  const db = getNodeSqliteKysely<RemoteModelCatalogDatabase>(state.db);
-  return executeSqliteQueryTakeFirstSync(
-    state.db,
-    db.selectFrom("model_catalog_remote").selectAll().where("id", "=", 1),
-  );
+  return withExistingOpenClawStateDatabaseReadOnly((state) => {
+    // sqlite-allow-raw -- guard an optional feature table without mutating shared state.
+    const tableExists = state.db
+      .prepare("SELECT 1 FROM sqlite_schema WHERE type = 'table' AND name = ?")
+      .get("model_catalog_remote");
+    if (!tableExists) {
+      return undefined;
+    }
+    const db = getNodeSqliteKysely<RemoteModelCatalogDatabase>(state.db);
+    return executeSqliteQueryTakeFirstSync(
+      state.db,
+      db.selectFrom("model_catalog_remote").selectAll().where("id", "=", 1),
+    );
+  }, options);
 }
 
 export function writeRemoteModelCatalog(

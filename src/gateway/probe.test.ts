@@ -484,6 +484,7 @@ describe("probeGateway", () => {
       },
     ]);
     expect(gatewayClientState.options?.env).toBe(env);
+    expect(gatewayClientState.options?.sharedStateMode).toBe("read-only");
   });
 
   it("keeps device identity enabled for remote probes", async () => {

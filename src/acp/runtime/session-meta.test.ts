@@ -229,6 +229,50 @@ describe("ACP session metadata SQLite store", () => {
     });
   });
 
+  it("batch-loads metadata read-only without migrating lifecycle revisions", async () => {
+    await withTestDir({ prefix: "openclaw-acp-batch-read-only-" }, async (dir) => {
+      const databasePath = path.join(dir, "state", "openclaw.sqlite");
+      const sessionKey = "agent:main:main";
+      const entry: SessionEntry = {
+        sessionId: "legacy-session-id",
+        lifecycleRevision: "current-lifecycle-revision",
+        updatedAt: 100,
+      };
+      writeAcpSessionMetaForMigration({
+        databasePath,
+        sessionKey,
+        sessionId: entry.sessionId,
+        meta: {
+          backend: "acpx",
+          agent: "codex",
+          runtimeSessionName: "read-only-session",
+          mode: "persistent",
+          state: "idle",
+          lastActivityAt: 123,
+        },
+      });
+      closeOpenClawStateDatabaseForTest();
+      const before = fs.readFileSync(databasePath);
+
+      const batch = readAcpSessionMetaBatch({
+        databasePath,
+        entries: [{ sessionKey, entry }],
+        readOnly: true,
+      });
+
+      expect(batch.get(entry)?.runtimeSessionName).toBe("read-only-session");
+      expect(fs.readFileSync(databasePath)).toEqual(before);
+      closeOpenClawStateDatabaseForTest();
+      expect(
+        readAcpSessionMetaForEntry({
+          databasePath,
+          sessionKey,
+          entry: { ...entry, sessionId: "x" },
+        }),
+      ).toBeUndefined();
+    });
+  });
+
   it("deletes the legacy row selected by fallback when metadata is cleared", async () => {
     await withTestDir({ prefix: "openclaw-acp-clear-legacy-owner-" }, async (dir) => {
       const storePath = path.join(dir, "sessions.json");
