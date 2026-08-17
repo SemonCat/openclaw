@@ -2,7 +2,7 @@
 import { getTerminalTableWidth, renderTable } from "../../packages/terminal-core/src/table.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
 import { listAgentIds } from "../agents/agent-scope-config.js";
-import { getRuntimeConfig } from "../config/config.js";
+import { getRuntimeConfig, getRuntimeConfigForInspection } from "../config/config.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import {
   tracePluginLifecyclePhase,
@@ -130,16 +130,21 @@ export async function runPluginsInspectCommand(
   } = await import("../plugins/status.js");
   const { loadInstalledPluginIndexInstallRecords } =
     await import("../plugins/installed-plugin-index-records.js");
-  const cfg = tracePluginLifecyclePhase("config read", () => getRuntimeConfig(), {
-    command: "inspect",
-  });
+  const runtimeInspect = opts.runtime === true;
+  const cfg = tracePluginLifecyclePhase(
+    "config read",
+    () =>
+      runtimeInspect
+        ? getRuntimeConfig()
+        : getRuntimeConfigForInspection({ skipPluginValidation: true }),
+    { command: "inspect" },
+  );
   const installRecords = await tracePluginLifecyclePhaseAsync(
     "install records load",
     () => loadInstalledPluginIndexInstallRecords(),
     { command: "inspect" },
   );
   const loggerParams = opts.json ? { logger: quietPluginJsonLogger } : {};
-  const runtimeInspect = opts.runtime === true;
   if (opts.all) {
     if (id) {
       failPluginInspect("Pass either a plugin id or --all, not both.", opts.json);

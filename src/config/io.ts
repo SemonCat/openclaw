@@ -9,6 +9,7 @@ export {
 export {
   clearConfigCache,
   getRuntimeConfig,
+  getRuntimeConfigForInspection,
   loadConfig,
   promoteConfigSnapshotToLastKnownGood,
   readBestEffortConfig,
