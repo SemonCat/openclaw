@@ -88,6 +88,35 @@ describe("command-path-policy", () => {
     expectResolvedPolicy(["nodes", "pair"], { networkProxy: "bypass" });
   });
 
+  it("keeps gateway-owned node and device mutations off the local config guard", () => {
+    for (const subcommand of [
+      "list",
+      "join-code",
+      "approve",
+      "reject",
+      "remove",
+      "clear",
+      "rename",
+      "rotate",
+      "revoke",
+    ]) {
+      const commandPath = ["devices", subcommand];
+      expectResolvedPolicy(commandPath, {
+        configGuard: "validate",
+        networkProxy: "bypass",
+      });
+    }
+  });
+
+  it("keeps gateway suspension RPCs on non-observing config validation", () => {
+    for (const subcommand of ["suspend", "resume"]) {
+      expectResolvedPolicy(["gateway", subcommand], {
+        configGuard: "validate",
+        networkProxy: "bypass",
+      });
+    }
+  });
+
   it("applies exact overrides after broader channel plugin rules", () => {
     expectResolvedPolicy(["channels", "send"], {
       loadPlugins: "always",
