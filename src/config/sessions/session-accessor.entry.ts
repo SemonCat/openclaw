@@ -60,6 +60,8 @@ import {
 } from "./store-entry.js";
 import { resolveAllAgentSessionStoreTargetsSync, type SessionStoreTarget } from "./targets.js";
 import type { SessionEntry } from "./types.js";
+export { readRecentSessionEntrySnapshotReadOnly } from "./session-accessor.sqlite-status-summary.js";
+export type { RecentSessionEntrySnapshot } from "./session-accessor.sqlite-status-summary.js";
 
 export { clearPluginOwnedSessionState };
 

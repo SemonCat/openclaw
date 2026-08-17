@@ -190,11 +190,11 @@ vi.mock("../infra/device-identity.js", () => ({
 }));
 
 vi.mock("../infra/device-auth-store.js", () => ({
-  loadDeviceAuthToken: (params: unknown) => {
+  loadDeviceAuthTokenReadOnly: (params: unknown) => {
     deviceIdentityState.tokenParams.push(params);
     return deviceIdentityState.cachedToken;
   },
-  loadOriginDeviceToken: (params: unknown) => {
+  loadOriginDeviceTokenReadOnly: (params: unknown) => {
     deviceIdentityState.originTokenParams.push(params);
     return deviceIdentityState.cachedOriginToken;
   },
@@ -464,6 +464,7 @@ describe("probeGateway", () => {
       },
     ]);
     expect(gatewayClientState.options?.env).toBe(env);
+    expect(gatewayClientState.options?.sharedStateMode).toBe("read-only");
   });
 
   it("keeps device identity enabled for remote probes", async () => {

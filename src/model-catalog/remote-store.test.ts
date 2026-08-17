@@ -22,7 +22,7 @@ afterEach(() => {
 });
 
 describe("remote model catalog store", () => {
-  it("lazily adds the cache table to an existing current-schema database", () => {
+  it("keeps reads non-mutating and lets the first write add the cache table", () => {
     const root = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-catalog-")));
     roots.push(root);
     const options = { path: path.join(root, "state.sqlite") };
@@ -49,6 +49,26 @@ describe("remote model catalog store", () => {
     closeOpenClawStateDatabaseForTest();
 
     expect(readRemoteModelCatalog(options)).toBeUndefined();
+    const stillMissing = new DatabaseSync(options.path, { readOnly: true });
+    expect(
+      stillMissing
+        .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' AND name = ?")
+        .get("model_catalog_remote"),
+    ).toBeUndefined();
+    stillMissing.close();
+
+    writeRemoteModelCatalog(
+      {
+        bundle_json: '{"schemaVersion":1}',
+        generated_at: 1,
+        min_version: null,
+        source_url: "https://catalog.test/one",
+        etag: null,
+        last_modified: null,
+        checked_at: 2,
+      },
+      options,
+    );
     const upgraded = new DatabaseSync(options.path, { readOnly: true });
     expect(
       upgraded
@@ -63,7 +83,9 @@ describe("remote model catalog store", () => {
     roots.push(root);
     const options = { path: path.join(root, "state.sqlite") };
     expect(readRemoteModelCatalog(options)).toBeUndefined();
+    expect(fs.existsSync(options.path)).toBe(false);
     expect(readRemoteModelCatalog(options)).toBeUndefined();
+    expect(fs.existsSync(options.path)).toBe(false);
     writeRemoteModelCatalog(
       {
         bundle_json: '{"schemaVersion":1}',

@@ -13,8 +13,8 @@ import {
 } from "../config/sessions/model-override-provenance.js";
 import { resolveSessionStorePathCore } from "../config/sessions/paths.js";
 import {
-  listSessionEntriesReadOnly,
   loadExactSessionEntryReadOnly,
+  readRecentSessionEntrySnapshotReadOnly,
 } from "../config/sessions/session-accessor.js";
 import {
   resolveFreshSessionTotalTokens,
@@ -23,6 +23,7 @@ import {
 } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.js";
 import { listGatewayAgentsBasic } from "../gateway/agent-list.js";
+import { resolveStoredSessionKeyForAgentStore } from "../gateway/session-store-key.js";
 import { resolveHeartbeatSessionKey } from "../infra/heartbeat-runner-session.js";
 import { resolveHeartbeatSummaryForAgent } from "../infra/heartbeat-summary.js";
 import { hasResolvableHeartbeatOwnerRoute } from "../infra/outbound/targets.js";
@@ -219,22 +220,6 @@ function selectRecentSessionCandidates(
   return selected;
 }
 
-function listSessionCandidates(storePath: string, agentId?: string) {
-  return (
-    listSessionEntriesReadOnly({
-      ...(agentId ? { agentId } : {}),
-      storePath,
-    })
-      // Compatibility aggregate buckets are not real user sessions.
-      .filter(({ sessionKey }) => sessionKey !== "global" && sessionKey !== "unknown")
-      .map(({ sessionKey, entry }) => ({
-        key: sessionKey,
-        entry,
-        updatedAt: entry?.updatedAt ?? null,
-      }))
-  );
-}
-
 /** Removes session paths and recent session details from a status summary. */
 export function redactSensitiveStatusSummary(summary: StatusSummary): StatusSummary {
   return {
@@ -272,6 +257,7 @@ export async function getStatusSummary(
     resolveConfiguredStatusModelRef,
     resolveContextTokensForModel,
     resolveSessionRuntimeLabel,
+    resolveAcpSessionMetaBatch,
     resolveSessionModelRef,
     resolveStatusModelComparisonLabel,
     resolveStatusModelLookupRef,
@@ -413,20 +399,38 @@ export async function getStatusSummary(
       allowAsyncLoad: false,
     }) ?? DEFAULT_CONTEXT_TOKENS;
 
-  const candidateCache = new Map<string, SessionCandidate[]>();
+  const candidateCache = new Map<string, { count: number; candidates: SessionCandidate[] }>();
   const loadSessionCandidates = (storePath: string, agentId?: string) => {
     const cacheKey = `${storePath}\0${agentId ?? ""}`;
     const cached = candidateCache.get(cacheKey);
     if (cached) {
       return cached;
     }
-    const candidates = listSessionCandidates(storePath, agentId);
-    candidateCache.set(cacheKey, candidates);
-    return candidates;
+    const snapshot = readRecentSessionEntrySnapshotReadOnly({
+      ...(agentId ? { agentId } : {}),
+      storePath,
+      clone: false,
+      projection: "list",
+      limit: RECENT_SESSION_LIMIT,
+    });
+    const loaded = {
+      count: snapshot.count,
+      candidates: snapshot.entries.map(({ sessionKey, entry }) => ({
+        key: sessionKey,
+        entry,
+        updatedAt: entry.updatedAt ?? null,
+      })),
+    };
+    candidateCache.set(cacheKey, loaded);
+    return loaded;
   };
   const buildSessionRows = async (
     candidates: SessionCandidate[],
     opts: { agentIdOverride?: string } = {},
+    acpSessionMetaByEntry = new Map<
+      SessionEntry,
+      import("../config/sessions/types.js").SessionAcpMeta | undefined
+    >(),
   ) =>
     Promise.all(
       candidates.map(async ({ key, entry, updatedAt }) => {
@@ -510,6 +514,7 @@ export async function getStatusSummary(
           model: lookupModelId ?? "",
           agentId,
           sessionKey: key,
+          acpMeta: acpSessionMetaByEntry.get(entry),
         });
 
         return {
@@ -561,37 +566,68 @@ export async function getStatusSummary(
     pathCounts.set(source.storePath, (pathCounts.get(source.storePath) ?? 0) + 1);
   }
 
-  const byAgent = await Promise.all(
-    agentList.agents.map(async (agent) => {
-      const storePath = resolveSessionStorePathCore(cfg.session?.store, { agentId: agent.id });
-      const candidates = loadSessionCandidates(storePath, agent.id);
-      const sessions = await buildSessionRows(
-        selectRecentSessionCandidates(candidates, RECENT_SESSION_LIMIT),
-        { agentIdOverride: agent.id },
-      );
-      return {
-        agentId: agent.id,
-        path: storePath,
-        count: candidates.length,
-        recent: sessions,
-      };
-    }),
-  );
+  const recentCandidatesByAgent = agentList.agents.map((agent) => {
+    const storePath = resolveSessionStorePathCore(cfg.session?.store, { agentId: agent.id });
+    const snapshot = loadSessionCandidates(storePath, agent.id);
+    return {
+      agent,
+      storePath,
+      count: snapshot.count,
+      recentCandidates: snapshot.candidates,
+    };
+  });
 
-  const allSessions = storeSources
+  const aggregateSnapshots = storeSources
     .filter((source, index, sources) => {
       return sources.findIndex((candidate) => candidate.storePath === source.storePath) === index;
     })
-    .flatMap((source) =>
+    .map((source) =>
       loadSessionCandidates(
         source.storePath,
         pathCounts.get(source.storePath) === 1 ? source.agentId : undefined,
       ),
     );
-  const recent = await buildSessionRows(
-    selectRecentSessionCandidates(allSessions, RECENT_SESSION_LIMIT),
+  const allSessions = aggregateSnapshots.flatMap((snapshot) => snapshot.candidates);
+  const recentCandidates = selectRecentSessionCandidates(allSessions, RECENT_SESSION_LIMIT);
+  const acpBatchEntries = [
+    ...recentCandidatesByAgent.flatMap(({ agent, recentCandidates: agentRecentCandidates }) =>
+      agentRecentCandidates.map(({ key, entry }) => ({ key, entry, agentId: agent.id })),
+    ),
+    ...recentCandidates.map(({ key, entry }) => ({
+      key,
+      entry,
+      agentId: parseAgentSessionKey(key)?.agentId,
+    })),
+  ].map(({ key, entry, agentId }) =>
+    agentId
+      ? {
+          sessionKey: resolveStoredSessionKeyForAgentStore({ cfg, agentId, sessionKey: key }),
+          agentId,
+          entry,
+        }
+      : { sessionKey: key, entry },
   );
-  const totalSessions = allSessions.length;
+  const acpSessionMetaByEntry = resolveAcpSessionMetaBatch({ cfg, entries: acpBatchEntries });
+
+  const byAgent = await Promise.all(
+    recentCandidatesByAgent.map(
+      async ({ agent, storePath, count, recentCandidates: agentRecentCandidates }) => {
+        const sessions = await buildSessionRows(
+          agentRecentCandidates,
+          { agentIdOverride: agent.id },
+          acpSessionMetaByEntry,
+        );
+        return {
+          agentId: agent.id,
+          path: storePath,
+          count,
+          recent: sessions,
+        };
+      },
+    ),
+  );
+  const recent = await buildSessionRows(recentCandidates, {}, acpSessionMetaByEntry);
+  const totalSessions = aggregateSnapshots.reduce((total, snapshot) => total + snapshot.count, 0);
   const hostDesktopStatus =
     options.hostDesktopStatus ??
     (

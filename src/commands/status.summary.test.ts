@@ -1,4 +1,3 @@
-// Status summary tests cover aggregate status text for channels, sessions, tasks, and audit findings.
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { SESSION_TOTAL_TOKENS_VERSION } from "../config/sessions/types.js";
 import { setActiveDegradedPlugins } from "../plugins/runtime-degraded-state.js";
@@ -6,6 +5,7 @@ import { setActiveDegradedSecretOwners } from "../secrets/runtime-degraded-state
 import type { TaskAuditFinding } from "../tasks/task-registry.audit.js";
 import type { TaskRecord, TaskRegistrySummary } from "../tasks/task-registry.types.js";
 import { normalizeSessionDeliveryState } from "../utils/delivery-context.shared.js";
+import { buildRecentSessionEntrySnapshot as recentSnapshot } from "./status.summary.recent-test-support.js";
 
 const statusSummaryMocks = vi.hoisted(() => ({
   hasConfiguredChannelsForReadOnlyScope: vi.fn(() => true),
@@ -17,6 +17,9 @@ const statusSummaryMocks = vi.hoisted(() => ({
       entry: Record<string, unknown>;
     }>
   >(() => []),
+  readRecentSessionEntrySnapshotReadOnly: vi.fn((scope) =>
+    recentSnapshot(statusSummaryMocks.listSessionEntriesCore, scope),
+  ),
   taskRegistrySummary: {
     total: 0,
     active: 0,
@@ -83,6 +86,7 @@ vi.mock("../status/summary.runtime.js", () => ({
       model: "gpt-5.5",
     })),
     resolveSessionRuntimeLabel: vi.fn(() => "OpenClaw Default"),
+    resolveAcpSessionMetaBatch: vi.fn(() => new Map()),
     resolveStatusModelLookupRef: vi.fn(({ provider, model }) =>
       typeof model === "string" && model.length > 0
         ? {
@@ -144,7 +148,7 @@ vi.mock("../config/sessions/session-accessor.js", () => ({
     return entry ? { sessionKey, entry } : undefined;
   },
   listSessionEntriesCore: statusSummaryMocks.listSessionEntriesCore,
-  listSessionEntriesReadOnly: statusSummaryMocks.listSessionEntriesCore,
+  readRecentSessionEntrySnapshotReadOnly: statusSummaryMocks.readRecentSessionEntrySnapshotReadOnly,
 }));
 
 vi.mock("../gateway/agent-list.js", () => ({
@@ -293,8 +297,6 @@ describe("getStatusSummary", () => {
     expect(summary.taskAudit.warnings).toBe(1);
   });
 
-  // waitingForRoute must follow the session the runner actually reads
-  // (heartbeat.session when set), not always the agent main session.
   it.each([
     {
       name: "main routed, no configured session",
@@ -790,15 +792,11 @@ describe("getStatusSummary", () => {
       "agent:main:session-4",
       "agent:main:session-3",
     ]);
-    expect(summary.sessions.byAgent[0]?.recent.map((session) => session.key)).toEqual(
-      summary.sessions.recent.map((session) => session.key),
-    );
-
     const hydratedKeys = vi
       .mocked(statusSummaryRuntime.resolveSessionRuntimeLabel)
       .mock.calls.map(([params]) => params.sessionKey);
     expect(hydratedKeys).not.toContain("agent:main:session-1");
-    expect(hydratedKeys).not.toContain("agent:main:session-2");
+    expect(statusSummaryRuntime.resolveAcpSessionMetaBatch).toHaveBeenCalledTimes(1);
   });
 
   it("preserves store order for tied recent session timestamps", async () => {

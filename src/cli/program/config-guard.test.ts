@@ -190,6 +190,26 @@ describe("ensureConfigReady", () => {
       expectedDoctorCalls: 0,
     },
     {
+      name: "skips doctor flow for gateway probes",
+      commandPath: ["gateway", "probe"],
+      expectedDoctorCalls: 0,
+    },
+    {
+      name: "skips doctor flow for gateway health",
+      commandPath: ["gateway", "health"],
+      expectedDoctorCalls: 0,
+    },
+    {
+      name: "skips doctor flow for gateway status",
+      commandPath: ["gateway", "status"],
+      expectedDoctorCalls: 0,
+    },
+    {
+      name: "skips doctor flow for gateway discovery",
+      commandPath: ["gateway", "discover"],
+      expectedDoctorCalls: 0,
+    },
+    {
       name: "skips doctor flow for config set",
       commandPath: ["config", "set"],
       expectedDoctorCalls: 0,
@@ -276,9 +296,22 @@ describe("ensureConfigReady", () => {
     expect(loadAndMaybeMigrateDoctorConfigMock).not.toHaveBeenCalled();
   });
 
-  it("keeps remote gateway call config reads non-observing", async () => {
-    await runEnsureConfigReady(["gateway", "call"]);
+  it.each(["call", "status", "probe", "health", "discover"])(
+    "keeps gateway %s config reads non-observing",
+    async (subcommand) => {
+      await runEnsureConfigReady(["gateway", subcommand]);
 
+      expect(readConfigFileSnapshotMock).toHaveBeenCalledWith({ observe: false });
+    },
+  );
+
+  it("keeps top-level status from migrating existing local state", async () => {
+    const root = useTempOpenClawHome();
+    writeLegacyTaskSidecarMarker(root);
+
+    await runEnsureConfigReady(["status"]);
+
+    expect(loadAndMaybeMigrateDoctorConfigMock).not.toHaveBeenCalled();
     expect(readConfigFileSnapshotMock).toHaveBeenCalledWith({ observe: false });
   });
 
@@ -286,13 +319,12 @@ describe("ensureConfigReady", () => {
     const root = useTempOpenClawHome();
     writeLegacyTaskSidecarMarker(root);
 
-    await runEnsureConfigReady(["status"]);
+    await runEnsureConfigReady(["agent"]);
 
     expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledWith({
       migrateState: true,
       migrateLegacyConfig: false,
       invalidConfigNote: false,
-      observe: false,
       requireStateMigrationCheckpoint: true,
     });
   });
@@ -322,13 +354,12 @@ describe("ensureConfigReady", () => {
       const root = useTempOpenClawHome();
       writeStateMarker(root, relativePath);
 
-      await runEnsureConfigReady(["status"]);
+      await runEnsureConfigReady(["agent"]);
 
       expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledWith({
         migrateState: true,
         migrateLegacyConfig: false,
         invalidConfigNote: false,
-        observe: false,
         requireStateMigrationCheckpoint: true,
       });
     },
@@ -338,13 +369,12 @@ describe("ensureConfigReady", () => {
     const root = useTempOpenClawHome();
     writePendingTaskSidecarArchiveMarker(root);
 
-    await runEnsureConfigReady(["status"]);
+    await runEnsureConfigReady(["agent"]);
 
     expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledWith({
       migrateState: true,
       migrateLegacyConfig: false,
       invalidConfigNote: false,
-      observe: false,
       requireStateMigrationCheckpoint: true,
     });
   });
@@ -381,22 +411,23 @@ describe("ensureConfigReady", () => {
     expect(runtime.exit).toHaveBeenCalledWith(78);
   });
 
-  it("uses only the state migration checkpoint for gateway probes", async () => {
-    await runEnsureConfigReady(["gateway", "health"]);
+  it.each(["call", "status", "probe", "health", "discover"])(
+    "keeps gateway %s from migrating existing local state",
+    async (subcommand) => {
+      const root = useTempOpenClawHome();
+      writeLegacyTaskSidecarMarker(root);
 
-    expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledWith({
-      migrateState: true,
-      migrateLegacyConfig: false,
-      invalidConfigNote: false,
-      requireStateMigrationCheckpoint: true,
-    });
-  });
+      await runEnsureConfigReady(["gateway", subcommand]);
+
+      expect(loadAndMaybeMigrateDoctorConfigMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("runs doctor flow for legacy sessions without task sidecars", async () => {
     const root = useTempOpenClawHome();
     fs.mkdirSync(path.join(root, ".openclaw", "sessions"), { recursive: true });
 
-    await runEnsureConfigReady(["status"]);
+    await runEnsureConfigReady(["agent"]);
 
     expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledOnce();
   });
@@ -520,7 +551,7 @@ describe("ensureConfigReady", () => {
     const root = useTempOpenClawHome();
     writeStateMarker(root, relativePath);
 
-    await runEnsureConfigReady(["status"]);
+    await runEnsureConfigReady(["agent"]);
 
     expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledOnce();
   });
@@ -533,15 +564,12 @@ describe("ensureConfigReady", () => {
     deleteTestEnvValue("OPENCLAW_STATE_DIR");
     writeLegacyTaskSidecarMarker(path.join(root, "svc"));
 
-    await runEnsureConfigReady(["status"]);
+    await runEnsureConfigReady(["agent"]);
 
     expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledOnce();
   });
 
-  it.each([
-    { name: "status", commandPath: ["status"] },
-    { name: "plugin listing", commandPath: ["plugins", "list"] },
-  ])(
+  it.each([{ name: "plugin listing", commandPath: ["plugins", "list"] }])(
     "runs doctor flow for $name with configured custom session stores",
     async ({ commandPath }) => {
       const root = useTempOpenClawHome();
@@ -562,6 +590,22 @@ describe("ensureConfigReady", () => {
       expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledOnce();
     },
   );
+
+  it("keeps status read-only with configured custom session stores", async () => {
+    const root = useTempOpenClawHome();
+    const customStore = path.join(root, "sessions", "sessions.json");
+    const snapshot = {
+      ...makeSnapshot(),
+      config: { session: { store: customStore } },
+      runtimeConfig: { session: { store: customStore } },
+    };
+    readConfigFileSnapshotMock.mockResolvedValue(snapshot);
+
+    await runEnsureConfigReady(["status"]);
+
+    expect(loadAndMaybeMigrateDoctorConfigMock).not.toHaveBeenCalled();
+    expect(readConfigFileSnapshotMock).toHaveBeenCalledWith({ observe: false });
+  });
 
   it("pins a valid preflight snapshot for command code reuse", async () => {
     const snapshot = {

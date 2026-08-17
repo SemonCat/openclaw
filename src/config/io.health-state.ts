@@ -1,11 +1,9 @@
 import { formatErrorMessage } from "../infra/errors.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
 // Stores config health fingerprints in shared SQLite state.
+import { withExistingOpenClawStateDatabaseArtifactPreservingReadOnly } from "../state/openclaw-state-db-readonly.js";
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
-import {
-  openOpenClawStateDatabase,
-  runOpenClawStateWriteTransaction,
-} from "../state/openclaw-state-db.js";
+import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
 import { OpenClawStateOwnershipError } from "../state/openclaw-state-ownership.js";
 
 export type ConfigHealthFingerprint = {
@@ -69,32 +67,38 @@ function stringifyConfigHealthFingerprint(
 
 export function readConfigHealthStateFromStore(deps: ConfigHealthStateDeps): ConfigHealthState {
   try {
-    const database = openOpenClawStateDatabase({ env: resolveConfigHealthStateEnv(deps) });
-    const healthDb = getNodeSqliteKysely<ConfigHealthDatabase>(database.db);
-    const rows = executeSqliteQuerySync(
-      database.db,
-      healthDb
-        .selectFrom("config_health_entries")
-        .select([
-          "config_path",
-          "last_known_good_json",
-          "last_promoted_good_json",
-          "last_observed_suspicious_signature",
-        ])
-        .orderBy("config_path", "asc"),
-    ).rows;
-    return {
-      entries: Object.fromEntries(
-        rows.map((row) => [
-          row.config_path,
-          {
-            lastKnownGood: parseConfigHealthFingerprint(row.last_known_good_json),
-            lastPromotedGood: parseConfigHealthFingerprint(row.last_promoted_good_json),
-            lastObservedSuspiciousSignature: row.last_observed_suspicious_signature,
-          } satisfies ConfigHealthEntry,
-        ]),
-      ),
-    };
+    return (
+      withExistingOpenClawStateDatabaseArtifactPreservingReadOnly(
+        (database) => {
+          const healthDb = getNodeSqliteKysely<ConfigHealthDatabase>(database.db);
+          const rows = executeSqliteQuerySync(
+            database.db,
+            healthDb
+              .selectFrom("config_health_entries")
+              .select([
+                "config_path",
+                "last_known_good_json",
+                "last_promoted_good_json",
+                "last_observed_suspicious_signature",
+              ])
+              .orderBy("config_path", "asc"),
+          ).rows;
+          return {
+            entries: Object.fromEntries(
+              rows.map((row) => [
+                row.config_path,
+                {
+                  lastKnownGood: parseConfigHealthFingerprint(row.last_known_good_json),
+                  lastPromotedGood: parseConfigHealthFingerprint(row.last_promoted_good_json),
+                  lastObservedSuspiciousSignature: row.last_observed_suspicious_signature,
+                } satisfies ConfigHealthEntry,
+              ]),
+            ),
+          };
+        },
+        { env: resolveConfigHealthStateEnv(deps) },
+      ) ?? {}
+    );
   } catch (error) {
     if (error instanceof OpenClawStateOwnershipError) {
       throw error;

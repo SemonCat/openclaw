@@ -10,6 +10,7 @@ const mocks = vi.hoisted(() => ({
   resolveNodeExecEligibility: vi.fn(() => ({ canExec: false })),
   loadExecApprovalsReadOnly: vi.fn(() => ({ version: 1, agents: {} })),
   buildWorkspaceSkillStatus: vi.fn(() => null),
+  buildPluginCompatibilitySnapshotNotices: vi.fn(() => []),
 }));
 
 vi.mock("../../agents/exec-defaults.js", () => ({
@@ -34,7 +35,9 @@ vi.mock("../../infra/exec-approvals.js", () => ({
 vi.mock("../../infra/restart-sentinel.js", () => ({
   readRestartSentinelReadOnly: async () => null,
 }));
-vi.mock("../../plugins/status.js", () => ({ buildPluginCompatibilityNotices: () => [] }));
+vi.mock("../../plugins/status.js", () => ({
+  buildPluginCompatibilitySnapshotNotices: mocks.buildPluginCompatibilitySnapshotNotices,
+}));
 vi.mock("../../skills/discovery/status.js", () => ({
   buildWorkspaceSkillStatus: mocks.buildWorkspaceSkillStatus,
 }));
@@ -94,6 +97,7 @@ describe("buildStatusAllReportData", () => {
     expect(mocks.inspectPortUsage).toHaveBeenCalledWith(18789, {
       probeHosts: ["127.0.0.1"],
     });
+    expect(mocks.buildPluginCompatibilitySnapshotNotices).toHaveBeenCalledWith({ config: {} });
   });
 
   it("collects delivery and exporter stability projections in parallel", async () => {
