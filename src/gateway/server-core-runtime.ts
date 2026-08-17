@@ -572,7 +572,7 @@ export async function startGatewayCoreRuntime(input: {
     }
     await params.beforeReplace(
       channelsToStopBeforeReplace,
-      channelManager.getPluginCommandCatalogAccounts(),
+      channelManager.getPluginRegistryDependentAccounts(),
     );
     // If an in-process restart signalled abort during beforeReplace,
     // stop before any plugin metadata/runtime side effects continue.
