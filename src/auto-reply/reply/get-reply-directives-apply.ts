@@ -139,6 +139,8 @@ export async function applyInlineDirectiveOverrides(params: {
   elevatedFailures: Array<{ gate: string; key: string }>;
   defaultProvider: string;
   defaultModel: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   aliasIndex: HandleDirectiveOnlyParams["aliasIndex"];
   provider: string;
   model: string;
@@ -173,6 +175,8 @@ export async function applyInlineDirectiveOverrides(params: {
     elevatedFailures,
     defaultProvider,
     defaultModel,
+    sessionDefaultProvider,
+    sessionDefaultModel,
     aliasIndex,
     modelState,
     initialModelLabel,
@@ -205,6 +209,8 @@ export async function applyInlineDirectiveOverrides(params: {
     messageProviderKey,
     defaultProvider,
     defaultModel,
+    sessionDefaultProvider,
+    sessionDefaultModel,
     aliasIndex,
     ...directiveModelState,
     provider,
@@ -295,6 +301,8 @@ export async function applyInlineDirectiveOverrides(params: {
       agentDir,
       defaultProvider,
       defaultModel,
+      sessionDefaultProvider,
+      sessionDefaultModel,
       aliasIndex,
       modelPolicy: modelState.modelPolicy,
       allowedModelKeys: modelState.allowedModelKeys,
@@ -401,6 +409,8 @@ export async function applyInlineDirectiveOverrides(params: {
         agentDir,
         defaultProvider,
         defaultModel,
+        sessionDefaultProvider,
+        sessionDefaultModel,
         aliasIndex,
         modelPolicy: modelState.modelPolicy,
         allowedModelKeys: modelState.allowedModelKeys,
@@ -441,6 +451,8 @@ export async function applyInlineDirectiveOverrides(params: {
           sessionStore,
           defaultProvider,
           defaultModel,
+          sessionDefaultProvider,
+          sessionDefaultModel,
           currentProvider: provider,
           currentModel: model,
           modelPolicy: modelState.modelPolicy,
