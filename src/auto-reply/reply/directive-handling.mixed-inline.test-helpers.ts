@@ -22,6 +22,8 @@ export async function applyMixedDirectives(params: {
   model?: string;
   defaultProvider?: string;
   defaultModel?: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   allowedModels?: ModelCatalogEntry[];
   modelAliases?: string[];
   aliasIndex?: ModelAliasIndex;
@@ -110,6 +112,8 @@ export async function applyMixedDirectives(params: {
     elevatedFailures: [],
     defaultProvider: params.defaultProvider ?? provider,
     defaultModel: params.defaultModel ?? model,
+    sessionDefaultProvider: params.sessionDefaultProvider,
+    sessionDefaultModel: params.sessionDefaultModel,
     aliasIndex,
     provider,
     model,
