@@ -559,6 +559,8 @@ export async function resolveReplyDirectives(params: {
     elevatedFailures,
     defaultProvider,
     defaultModel,
+    sessionDefaultProvider: primaryProvider ?? defaultProvider,
+    sessionDefaultModel: primaryModel ?? defaultModel,
     aliasIndex: params.aliasIndex,
     provider,
     model,

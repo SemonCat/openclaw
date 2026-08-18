@@ -149,6 +149,8 @@ export async function handleDirectiveOnly(
     agentDir,
     defaultProvider,
     defaultModel,
+    sessionDefaultProvider: params.sessionDefaultProvider,
+    sessionDefaultModel: params.sessionDefaultModel,
     aliasIndex,
     allowedModelKeys,
     allowedModelCatalog,
@@ -160,8 +162,7 @@ export async function handleDirectiveOnly(
   if (modelResolution.errorText) {
     return rejectModelTransaction(modelResolution.errorText);
   }
-  const modelSelection = modelResolution.modelSelection;
-  const profileOverride = modelResolution.profileOverride;
+  const { modelSelection, profileOverride } = modelResolution;
   if (modelSelection && isModelSelectionLocked(sessionEntry)) {
     return rejectModelTransaction(MODEL_SELECTION_LOCKED_MESSAGE);
   }
@@ -184,8 +185,7 @@ export async function handleDirectiveOnly(
     if (prepared.status === "rejected") {
       return rejectModelTransaction(prepared.message);
     }
-    thinkingCatalog = prepared.catalog;
-    modelRuntimeResolution = prepared.runtime;
+    ({ catalog: thinkingCatalog, runtime: modelRuntimeResolution } = prepared);
   }
   const prospectiveSessionEntry = { ...sessionEntry };
   applyModelRuntimeDirective(prospectiveSessionEntry, modelRuntimeResolution);
