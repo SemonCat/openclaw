@@ -198,56 +198,58 @@ export async function maybeResolveNativeSlashCommandFastReply(params: {
     triggerBodyNormalized: sessionState.triggerBodyNormalized,
     commandAuthorized: params.commandAuthorized,
   });
+  const targetSessionEntry =
+    sessionState.sessionStore[sessionState.sessionKey] ?? sessionState.sessionEntry;
+  const deliveryChannel = normalizeMessageChannel(sessionDeliveryChannel(targetSessionEntry));
+  // Shared sessions can retain another channel's peer; never let that stale
+  // identity outrank the authorized current command's live sender.
+  const deliveryOrigin =
+    deliveryChannel && deliveryChannel === normalizeMessageChannel(command.channel)
+      ? sessionDeliveryOrigin(targetSessionEntry)
+      : undefined;
+  const channelModelOverride = params.cfg.channels?.modelByChannel
+    ? resolveChannelModelOverride({
+        cfg: params.cfg,
+        channel: command.channel,
+        groupId: targetSessionEntry?.groupId,
+        groupChatType: targetSessionEntry?.chatType ?? params.ctx.ChatType,
+        groupChannel: targetSessionEntry?.groupChannel ?? params.ctx.GroupChannel,
+        groupSubject: targetSessionEntry?.subject ?? params.ctx.GroupSubject,
+        parentSessionKey:
+          params.ctx.ModelParentSessionKey ??
+          params.ctx.ParentSessionKey ??
+          targetSessionEntry?.parentSessionKey,
+        directUserIds: [
+          deliveryOrigin?.nativeDirectUserId,
+          deliveryOrigin?.from,
+          deliveryOrigin?.to,
+          params.ctx.OriginatingTo,
+          params.ctx.From,
+          params.ctx.SenderId,
+        ],
+      })
+    : null;
+  const resolvedChannelModel = channelModelOverride
+    ? resolveModelRefFromString({
+        raw: channelModelOverride.model,
+        defaultProvider: params.defaultProvider,
+        aliasIndex: params.aliasIndex,
+      })
+    : null;
+  const sessionDefaultProvider = resolvedChannelModel?.ref.provider ?? params.defaultProvider;
+  const sessionDefaultModel = resolvedChannelModel?.ref.model ?? params.defaultModel;
   if (command.commandBodyNormalized === "/status") {
-    const targetSessionEntry =
-      sessionState.sessionStore[sessionState.sessionKey] ?? sessionState.sessionEntry;
     const canApplyChannelModel =
-      params.cfg.channels?.modelByChannel &&
+      resolvedChannelModel &&
       !isModelSelectionLocked(targetSessionEntry) &&
       !normalizeOptionalString(targetSessionEntry?.modelOverride) &&
       !normalizeOptionalString(targetSessionEntry?.providerOverride) &&
       params.provider === params.defaultProvider &&
       params.model === params.defaultModel;
-    const deliveryChannel = normalizeMessageChannel(sessionDeliveryChannel(targetSessionEntry));
-    // Shared sessions can retain another channel's peer; never let that stale
-    // identity outrank the authorized current command's live sender.
-    const deliveryOrigin =
-      deliveryChannel && deliveryChannel === normalizeMessageChannel(command.channel)
-        ? sessionDeliveryOrigin(targetSessionEntry)
-        : undefined;
-    const channelModelOverride = canApplyChannelModel
-      ? resolveChannelModelOverride({
-          cfg: params.cfg,
-          channel: command.channel,
-          groupId: targetSessionEntry?.groupId,
-          groupChatType: targetSessionEntry?.chatType ?? params.ctx.ChatType,
-          groupChannel: targetSessionEntry?.groupChannel ?? params.ctx.GroupChannel,
-          groupSubject: targetSessionEntry?.subject ?? params.ctx.GroupSubject,
-          parentSessionKey:
-            params.ctx.ModelParentSessionKey ??
-            params.ctx.ParentSessionKey ??
-            targetSessionEntry?.parentSessionKey,
-          directUserIds: [
-            deliveryOrigin?.nativeDirectUserId,
-            deliveryOrigin?.from,
-            deliveryOrigin?.to,
-            params.ctx.OriginatingTo,
-            params.ctx.From,
-            params.ctx.SenderId,
-          ],
-        })
-      : null;
-    const resolvedChannelModel = channelModelOverride
-      ? resolveModelRefFromString({
-          raw: channelModelOverride.model,
-          defaultProvider: params.defaultProvider,
-          aliasIndex: params.aliasIndex,
-        })
-      : null;
     // Native status returns before normal channel routing; select once before
     // preparing model-bound thinking, runtime, auth, context, or fast-mode facts.
-    const statusProvider = resolvedChannelModel?.ref.provider ?? params.provider;
-    const statusModel = resolvedChannelModel?.ref.model ?? params.model;
+    const statusProvider = canApplyChannelModel ? sessionDefaultProvider : params.provider;
+    const statusModel = canApplyChannelModel ? sessionDefaultModel : params.model;
     let resolvedDefaultThinkingLevel: ThinkLevel | undefined;
     const resolveDefaultThinkingLevel = async () => {
       resolvedDefaultThinkingLevel ??= await resolveNativeSlashDefaultThinkingLevel({
@@ -391,6 +393,8 @@ export async function maybeResolveNativeSlashCommandFastReply(params: {
     commandAuthorized: params.commandAuthorized,
     defaultProvider: params.defaultProvider,
     defaultModel: params.defaultModel,
+    primaryProvider: sessionDefaultProvider,
+    primaryModel: sessionDefaultModel,
     aliasIndex: params.aliasIndex,
     provider: params.provider,
     model: params.model,

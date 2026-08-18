@@ -56,6 +56,9 @@ export type ApplySessionModelSelectionParams = {
   allowCreate?: boolean;
   defaultProvider: string;
   defaultModel: string;
+  /** Effective default for this session after channel/thread routing policy. */
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   currentProvider: string;
   currentModel: string;
   allowedModelKeys: ReadonlySet<string>;
@@ -204,7 +207,12 @@ export async function applySessionModelSelection(
   }
   const request: SessionModelSelectionRequest = {
     ...params.request,
-    isDefault: normalizedModelKey === modelKey(params.defaultProvider, params.defaultModel),
+    isDefault:
+      normalizedModelKey ===
+      modelKey(
+        params.sessionDefaultProvider ?? params.defaultProvider,
+        params.sessionDefaultModel ?? params.defaultModel,
+      ),
   };
 
   const runtime = resolveRuntimeDirective({

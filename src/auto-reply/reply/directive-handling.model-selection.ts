@@ -52,6 +52,8 @@ export function resolveModelSelectionFromDirective(params: {
   agentDir: string;
   defaultProvider: string;
   defaultModel: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   aliasIndex: ModelAliasIndex;
   allowedModelKeys: Set<string>;
   allowedModelCatalog: Array<{ provider: string; id?: string; name?: string }>;
@@ -70,11 +72,13 @@ export function resolveModelSelectionFromDirective(params: {
   }
 
   const raw = params.directives.rawModelDirective.trim();
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? params.defaultProvider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? params.defaultModel;
   if (/^default$/i.test(raw)) {
     return {
       modelSelection: {
-        provider: params.defaultProvider,
-        model: params.defaultModel,
+        provider: sessionDefaultProvider,
+        model: sessionDefaultModel,
         isDefault: true,
       },
     };
@@ -136,8 +140,8 @@ export function resolveModelSelectionFromDirective(params: {
         provider: explicit.ref.provider,
         model: explicit.ref.model,
         isDefault:
-          explicit.ref.provider === params.defaultProvider &&
-          explicit.ref.model === params.defaultModel,
+          explicit.ref.provider === sessionDefaultProvider &&
+          explicit.ref.model === sessionDefaultModel,
         ...(explicit.alias ? { alias: explicit.alias } : {}),
       };
     }
@@ -160,7 +164,12 @@ export function resolveModelSelectionFromDirective(params: {
     }
 
     if (resolved.selection) {
-      modelSelection = resolved.selection;
+      modelSelection = {
+        ...resolved.selection,
+        isDefault:
+          resolved.selection.provider === sessionDefaultProvider &&
+          resolved.selection.model === sessionDefaultModel,
+      };
     }
   }
 
