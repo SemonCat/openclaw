@@ -72,6 +72,8 @@ async function applyMixedDirectives(params: {
   model?: string;
   defaultProvider?: string;
   defaultModel?: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   allowedModels?: ModelCatalogEntry[];
   modelAliases?: string[];
   aliasIndex?: ModelAliasIndex;
@@ -153,6 +155,8 @@ async function applyMixedDirectives(params: {
     elevatedFailures: [],
     defaultProvider: params.defaultProvider ?? provider,
     defaultModel: params.defaultModel ?? model,
+    sessionDefaultProvider: params.sessionDefaultProvider,
+    sessionDefaultModel: params.sessionDefaultModel,
     aliasIndex,
     provider,
     model,
@@ -609,6 +613,46 @@ describe("mixed inline directives", () => {
       modelOverrideSource: "user",
     });
     expect(persistStickyModelSelectionBestEffort).not.toHaveBeenCalled();
+  });
+
+  it("pins an explicit agent-default model when the channel default differs", async () => {
+    const aliasIndex: ModelAliasIndex = {
+      byAlias: new Map([
+        ["openai-sol", { alias: "openai-sol", ref: { provider: "openai", model: "gpt-5.6-sol" } }],
+      ]),
+      byKey: new Map([["openai/gpt-5.6-sol", ["openai-sol"]]]),
+    };
+    const { result, sessionEntry } = await applyMixedDirectives({
+      body: "/model openai-sol",
+      provider: "sub2api-op-go",
+      model: "deepseek-v4-flash",
+      defaultProvider: "openai",
+      defaultModel: "gpt-5.6-sol",
+      sessionDefaultProvider: "sub2api-op-go",
+      sessionDefaultModel: "deepseek-v4-flash",
+      modelAliases: ["openai-sol"],
+      aliasIndex,
+      allowedModels: [
+        { provider: "openai", id: "gpt-5.6-sol", name: "GPT-5.6-Sol" },
+        {
+          provider: "sub2api-op-go",
+          id: "deepseek-v4-flash",
+          name: "DeepSeek V4 Flash",
+        },
+      ],
+    });
+
+    expect(result).toMatchObject({
+      kind: "reply",
+      reply: {
+        text: "Model set to openai-sol (openai/gpt-5.6-sol) for this session only; configured default unchanged.",
+      },
+    });
+    expect(sessionEntry).toMatchObject({
+      providerOverride: "openai",
+      modelOverride: "gpt-5.6-sol",
+      modelOverrideSource: "user",
+    });
   });
 
   it("routes a mixed default reset to the actual default after clearing override fields", async () => {
