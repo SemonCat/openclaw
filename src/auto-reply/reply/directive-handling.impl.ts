@@ -148,6 +148,8 @@ export async function handleDirectiveOnly(
     agentDir,
     defaultProvider,
     defaultModel,
+    sessionDefaultProvider: params.sessionDefaultProvider,
+    sessionDefaultModel: params.sessionDefaultModel,
     aliasIndex,
     allowedModelKeys,
     allowedModelCatalog,

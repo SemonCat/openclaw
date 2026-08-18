@@ -23,6 +23,8 @@ type HandleDirectiveOnlyCoreParams = {
   messageProviderKey?: string;
   defaultProvider: string;
   defaultModel: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   aliasIndex: ModelAliasIndex;
   policyAliasIndex?: ModelAliasIndex;
   allowedModelKeys: Set<string>;
