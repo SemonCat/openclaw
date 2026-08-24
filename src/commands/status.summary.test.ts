@@ -9,8 +9,8 @@ import {
 import type { TaskAuditFinding } from "../tasks/task-registry.audit.js";
 import type { TaskRecord, TaskRegistrySummary } from "../tasks/task-registry.types.js";
 import { normalizeSessionDeliveryState } from "../utils/delivery-context.shared.js";
-import { registerStatusSummarySessionRowCases } from "./status.summary.test-support.js";
 import { buildRecentSessionEntrySnapshot as recentSnapshot } from "./status.summary.recent-test-support.js";
+import { registerStatusSummarySessionRowCases } from "./status.summary.test-support.js";
 
 const statusSummaryMocks = vi.hoisted(() => ({
   hasConfiguredChannelsForReadOnlyScope: vi.fn(() => true),
