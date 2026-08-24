@@ -482,12 +482,21 @@ export async function listAcpSessionEntries(params: {
   for (const row of rows) {
     for (const databaseIdentity of parseAcpDatabaseSessionKeyCandidates(row.session_key)) {
       const sessionKey = databaseIdentity.storeSessionKey;
-      const { agentId, storePath } = resolveSessionStorePathForAcp({
-        sessionKey,
-        agentId: databaseIdentity.agentId,
-        cfg,
-        env: params.env,
-      });
+      let resolvedStore: ReturnType<typeof resolveSessionStorePathForAcp>;
+      try {
+        resolvedStore = resolveSessionStorePathForAcp({
+          sessionKey,
+          agentId: databaseIdentity.agentId,
+          cfg,
+          env: params.env,
+        });
+      } catch (error) {
+        if ((error as { code?: unknown }).code === "AGENT_SELECTION_REQUIRED") {
+          continue;
+        }
+        throw error;
+      }
+      const { agentId, storePath } = resolvedStore;
       if (!storePath) {
         continue;
       }
