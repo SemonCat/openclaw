@@ -294,6 +294,8 @@ export function createCodexAppServerAgentHarness(
       // V2 owns native Codex auth and zero-tool attestation above.
       return runCodexHostPreparedIsolatedCompletion(params);
     },
+    canFinalizeSettledTurn: (settledAttempt) =>
+      settledAttempt.settledTurnFinalizationContext?.source === "openclaw-transcript",
     finalizeSettledTurn: async (params) => {
       const { runCodexSettledTurnFinalization } =
         await import("./src/app-server/settled-turn-finalizer.js");
