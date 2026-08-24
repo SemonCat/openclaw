@@ -860,4 +860,20 @@ describe("prepareTerminalWithSettledTurnFinalization", () => {
     );
     expect(transcriptMocks.appendAssistantMirrorMessageByIdentity).toHaveBeenCalledOnce();
   });
+
+  it("does not finalize when the harness lacks its required settled-turn evidence", async () => {
+    const attempt = settledFailedAttempt();
+    const input = finalizationInput(attempt);
+    (
+      input.finalization.harness as typeof input.finalization.harness & {
+        canFinalizeSettledTurn: (settledAttempt: typeof attempt) => boolean;
+      }
+    ).canFinalizeSettledTurn = vi.fn(() => false);
+
+    const result = await prepareTerminalWithSettledTurnFinalization(input);
+
+    expect(backendMocks.runSettledFinalization).not.toHaveBeenCalled();
+    expect(result.finalizationOutcome).toBe("not-attempted");
+    expect(result.attempt).toBe(attempt);
+  });
 });

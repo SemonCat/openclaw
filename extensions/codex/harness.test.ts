@@ -172,6 +172,17 @@ describe("Codex agent harness supports()", () => {
     expect(harness.delegatedExecutionPluginIds).toEqual(["voice-call"]);
   });
 
+  it("only offers settled-turn finalization with an attested OpenClaw transcript", () => {
+    type SettledAttempt = Parameters<NonNullable<typeof harness.canFinalizeSettledTurn>>[0];
+
+    expect(harness.canFinalizeSettledTurn?.({} as SettledAttempt)).toBe(false);
+    expect(
+      harness.canFinalizeSettledTurn?.({
+        settledTurnFinalizationContext: { source: "openclaw-transcript", messages: [] },
+      } as unknown as SettledAttempt),
+    ).toBe(true);
+  });
+
   it("supports openai as the primary OpenClaw routing id", () => {
     expect(harness.supports({ provider: "openai", requestedRuntime: "codex" })).toEqual({
       supported: true,

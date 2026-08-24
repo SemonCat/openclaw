@@ -390,6 +390,8 @@ type AgentHarnessRunCapability<
   /** Lets this harness resolve forwarded profiles or its own native credentials. */
   authBootstrap?: "harness";
   runAttempt(params: TAttemptParams): Promise<AgentHarnessAttemptResult>;
+  /** Reports whether harness-owned evidence is sufficient for settled-turn finalization. */
+  canFinalizeSettledTurn?(settledAttempt: AgentHarnessCanonicalAttemptResult): boolean;
   /**
    * Produces one final answer from a settled tool transcript without exposing
    * capabilities that can repeat or extend the completed work.

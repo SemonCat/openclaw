@@ -274,6 +274,8 @@ export function createCodexAppServerAgentHarness(
         },
       });
     },
+    canFinalizeSettledTurn: (settledAttempt) =>
+      settledAttempt.settledTurnFinalizationContext?.source === "openclaw-transcript",
     finalizeSettledTurn: async (params) => {
       const { runCodexSettledTurnFinalization } =
         await import("./src/app-server/settled-turn-finalizer.js");
