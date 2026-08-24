@@ -35,7 +35,7 @@ import {
 import { clearLegacyEmbeddedAcpMetadata } from "./session-meta-legacy-cleanup.js";
 import {
   readSessionEntryFromStore,
-  resolveSessionStorePathForAcp,
+  resolveListableSessionStorePathForAcp,
   resolveStoreEntryForSessionKey,
 } from "./session-meta-store.js";
 
@@ -473,24 +473,24 @@ export async function listAcpSessionEntries(params: {
   databasePath?: string;
 }): Promise<AcpSessionStoreEntry[]> {
   const cfg = params.cfg ?? getRuntimeConfig();
-  const rows = selectAcpSessionRows({
-    env: params.env,
-    path: params.databasePath,
-  });
   const entries: AcpSessionStoreEntry[] = [];
 
-  for (const row of rows) {
+  for (const row of selectAcpSessionRows({
+    env: params.env,
+    path: params.databasePath,
+  })) {
     for (const databaseIdentity of parseAcpDatabaseSessionKeyCandidates(row.session_key)) {
       const sessionKey = databaseIdentity.storeSessionKey;
-      const { agentId, storePath } = resolveSessionStorePathForAcp({
+      const resolvedStore = resolveListableSessionStorePathForAcp({
         sessionKey,
         agentId: databaseIdentity.agentId,
         cfg,
         env: params.env,
       });
-      if (!storePath) {
+      if (!resolvedStore) {
         continue;
       }
+      const { agentId, storePath } = resolvedStore;
       let storeSessionKey: string;
       let entry: SessionEntry | undefined;
       try {
