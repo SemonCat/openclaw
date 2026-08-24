@@ -10,6 +10,7 @@ import { closeOpenClawAgentDatabasesForTest } from "../../state/openclaw-agent-d
 import { closeOpenClawStateDatabaseForTest } from "../../state/openclaw-state-db.js";
 import { claimOpenClawStateOwnership } from "../../state/openclaw-state-ownership-operations.js";
 import { withTestDir } from "../../test-helpers/temp-dir.js";
+import { buildAcpDatabaseSessionKey } from "./session-meta-keys.js";
 import {
   listAcpSessionEntries,
   readAcpSessionEntry,
@@ -979,6 +980,32 @@ describe("ACP session metadata SQLite store", () => {
           state: "running",
         },
       });
+    });
+  });
+
+  it("skips stale agent-scoped ACP rows without a current session-store entry", async () => {
+    await withTestDir({ prefix: "openclaw-acp-meta-" }, async (dir) => {
+      const storePath = path.join(dir, "sessions.json");
+      const databasePath = path.join(dir, "state", "openclaw.sqlite");
+      const cfg = {
+        session: { store: storePath },
+        agents: { ownership: "explicit", entries: { main: {}, claude: {} } },
+      } satisfies OpenClawConfig;
+      const sessionKey = "agent:claude:acp:stale";
+      writeAcpSessionMetaForMigration({
+        databasePath,
+        sessionKey: buildAcpDatabaseSessionKey(sessionKey, "claude"),
+        meta: {
+          backend: "acpx",
+          agent: "claude",
+          runtimeSessionName: "stale",
+          mode: "persistent",
+          state: "idle",
+          lastActivityAt: 100,
+        },
+      });
+
+      await expect(listAcpSessionEntries({ cfg, databasePath })).resolves.toEqual([]);
     });
   });
 
