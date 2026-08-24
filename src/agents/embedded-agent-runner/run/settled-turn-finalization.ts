@@ -85,7 +85,8 @@ export async function prepareTerminalWithSettledTurnFinalization(input: {
     hasTerminalToolPresentation: input.finalization.hasTerminalToolPresentation,
     terminalState: initial.terminalState,
     settledTurnFinalizationAvailable:
-      typeof input.finalization.harness.finalizeSettledTurn === "function",
+      typeof input.finalization.harness.finalizeSettledTurn === "function" &&
+      (input.finalization.harness.canFinalizeSettledTurn?.(attempt) ?? true),
   });
   if (!prompt) {
     return {
