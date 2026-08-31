@@ -119,6 +119,28 @@ describe("captureCodexSettledTurnFinalizationContext", () => {
     expect(Object.isFrozen(context?.data[0])).toBe(true);
   });
 
+  it("accepts an attested prompt retained from the pre-recovery turn", async () => {
+    const settledMessages = settledTurn();
+    settledMessages[0] = message(
+      { role: "user", content: "Send it." },
+      "turn-before-restart:prompt",
+    );
+
+    const context = await captureContext({
+      historyMessages: settledMessages,
+      mirroredMessages: settledMessages,
+      settledMessages,
+      turnId: "turn-2",
+    });
+
+    expect(context?.source).toBe("harness");
+    expect(context?.data).toEqual([
+      { type: "message", role: "user", content: [{ type: "input_text", text: "Send it." }] },
+      { type: "function_call", call_id: "call-2", name: "message", arguments: "{}" },
+      { type: "function_call_output", call_id: "call-2", output: "sent" },
+    ]);
+  });
+
   it("adopts an exact host-persisted prompt without rewriting its canonical metadata", async () => {
     const { persistedPrompt, ...turn } = settledHostPromptTurn();
 

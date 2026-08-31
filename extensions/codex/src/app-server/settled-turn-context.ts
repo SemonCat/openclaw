@@ -76,7 +76,10 @@ function* verifiedSettledMessages(
   history: Iterable<AgentMessage>,
   params: SettledTurnMessages,
 ): Generator<AgentMessage> {
-  const promptIdentity = `${params.turnId}:prompt`;
+  // Restart recovery opens a successor Codex turn while retaining the exact
+  // attested prompt identity from the interrupted turn.
+  const sourcePrompt = params.settledMessages[0];
+  const promptIdentity = sourcePrompt && readMirrorIdentity(sourcePrompt);
   const boundaryIndex = params.settledMessages.findLastIndex(
     (message) => message.role === "toolResult",
   );
@@ -86,6 +89,7 @@ function* verifiedSettledMessages(
     .slice(0, boundaryIndex + 1)
     .flatMap((message) => readMirrorIdentity(message) ?? []);
   if (
+    !promptIdentity?.endsWith(":prompt") ||
     !boundaryIdentity?.startsWith(`${params.turnId}:tool:`) ||
     requiredIds.length !== boundaryIndex + 1 ||
     new Set(requiredIds).size !== requiredIds.length ||
@@ -93,7 +97,6 @@ function* verifiedSettledMessages(
   ) {
     rejectEvidence();
   }
-  const sourcePrompt = params.settledMessages[0];
   const sourceKey = (sourcePrompt as { idempotencyKey?: unknown } | undefined)?.idempotencyKey;
   const adoption =
     !params.mirroredMessages.some((message) => readMirrorIdentity(message) === promptIdentity) &&
