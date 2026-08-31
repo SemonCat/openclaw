@@ -574,7 +574,7 @@ export async function startGatewayCoreRuntime(input: {
     try {
       await params.beforeReplace(
         channelsToStopBeforeReplace,
-        channelManager.getPluginCommandCatalogAccounts(),
+        channelManager.getPluginRegistryDependentAccounts(),
       );
       // A rejected reservation restores startup authority; a committed replacement never does.
       if (params.isAborted?.()) {

@@ -6,6 +6,7 @@
 import path from "node:path";
 import { expect, test, vi } from "vitest";
 import * as sessionsConfig from "../config/sessions.js";
+import { loadCombinedSessionStoreForGatewayCore } from "../config/sessions/combined-store-gateway.js";
 import * as sessionAccessor from "../config/sessions/session-accessor.js";
 import { resolveSqliteTargetFromSessionStorePath } from "../config/sessions/session-sqlite-target.js";
 import type { SessionEntry } from "../config/sessions/types.js";
@@ -79,6 +80,33 @@ test("sessions.list does not materialize the lookup store once per row", async (
   // The post-await sharing refresh intentionally rereads current ACL state,
   // but one request-scoped load per store keeps that refresh linear.
   expect(large).toBeLessThan(small * 12);
+});
+
+test("local fast-open mode keeps Gateway list reads on the process-held entry cache", async () => {
+  const { storePath } = await createSessionStoreDir();
+  await writeSessionStore({
+    entries: { main: sessionStoreEntry("sess-main") },
+  });
+  const writableSpy = vi.spyOn(sessionAccessor, "listSessionEntriesCore");
+  const readOnlySpy = vi.spyOn(sessionAccessor, "listSessionEntriesReadOnly");
+  vi.stubEnv("OPENCLAW_FAST_AGENT_DB_OPEN", "1");
+  try {
+    const loaded = loadCombinedSessionStoreForGatewayCore(
+      {
+        agents: { list: [{ id: "main", default: true }] },
+        session: { store: storePath },
+      } as never,
+      { agentId: "main", projection: "list" },
+    );
+
+    expect(Object.keys(loaded.store)).toContain("agent:main:main");
+    expect(writableSpy).toHaveBeenCalled();
+    expect(readOnlySpy).not.toHaveBeenCalled();
+  } finally {
+    vi.unstubAllEnvs();
+    writableSpy.mockRestore();
+    readOnlySpy.mockRestore();
+  }
 });
 
 test("sessions.list reuses prepared store targets for sharing", async () => {

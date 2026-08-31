@@ -344,6 +344,17 @@
     },
     {
       "files": [
+        "src/acp/runtime/session-meta.ts",
+        "src/auto-reply/reply/directive-handling.impl.ts",
+        "src/state/openclaw-agent-db-schema.ts"
+      ],
+      "rules": {
+        // Temporary local backports keep the upstream file structure intact.
+        "max-lines": ["error", { "max": 720, "skipBlankLines": true, "skipComments": true }]
+      }
+    },
+    {
+      "files": [
         "src/**/*.{mjs,cjs}",
         "ui/src/**/*.{mjs,cjs}",
         "packages/**/*.{mjs,cjs}",
