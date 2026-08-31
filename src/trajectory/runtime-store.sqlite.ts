@@ -81,6 +81,8 @@ export function appendSqliteTrajectoryRuntimeEvents(
     Math.floor(scope.maxGlobalRuntimeBytes ?? TRAJECTORY_RUNTIME_GLOBAL_MAX_BYTES),
   );
   const sweepAt = Date.now();
+  const skipRetention =
+    (scope.env?.OPENCLAW_FAST_AGENT_DB_OPEN ?? process.env.OPENCLAW_FAST_AGENT_DB_OPEN) === "1";
   let sweptDatabase: OpenClawAgentDatabase | undefined;
   runOpenClawAgentWriteTransaction((database) => {
     const db = getTrajectoryKysely(database.db);
@@ -98,6 +100,12 @@ export function appendSqliteTrajectoryRuntimeEvents(
         }),
       );
       seq += 1;
+    }
+    // Local fast-open mode favors an unblocked Gateway over automatic telemetry
+    // size limits. Both retention passes synchronously scan event_json payloads;
+    // the global GROUP BY can touch hundreds of MiB while holding agent.write.
+    if (skipRetention) {
+      return;
     }
     trimSqliteTrajectoryRuntimeWindow(database, scope.sessionId, maxRuntimeBytes);
     const lastSweptAt = lastGlobalSweepAtByDatabase.get(database);

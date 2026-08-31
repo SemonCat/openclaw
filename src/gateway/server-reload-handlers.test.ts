@@ -4297,6 +4297,45 @@ describe("gateway channel hot reload handlers", () => {
     expect(reloadPlugins).toHaveBeenCalledOnce();
   });
 
+  it("does not recheck agent work after plugin reload stopped every account target", async () => {
+    const events: string[] = [];
+    const channels = createRecordedChannelHandlers(events);
+    const reloadPlugins = vi.fn(async (params): Promise<GatewayPluginReloadResult> => {
+      await params.beforeReplace(new Set(), new Map([["discord", new Set(["catalog-account"])]]));
+      hoisted.activeEmbeddedRunCount.value = 1;
+      events.push("registry:replace");
+      return makePluginReloadResult({ activeChannels: new Set(["discord"]) });
+    });
+    const logReload = { info: vi.fn(), warn: vi.fn() };
+    const { applyHotReload } = createReloadHandlersForTest(logReload, channels, reloadPlugins);
+    vi.useFakeTimers();
+    let reload: Promise<void> | undefined;
+
+    try {
+      await withChannelReloadsEnabled(async () => {
+        await withDiscordAccounts(["catalog-account"], async () => {
+          reload = applyHotReload(createPluginReloadPlan(), {});
+          await vi.advanceTimersByTimeAsync(0);
+
+          expect(events).toEqual([
+            "stop:discord:catalog-account",
+            "registry:replace",
+            "start:discord:catalog-account",
+          ]);
+          await reload;
+        });
+      });
+    } finally {
+      hoisted.activeEmbeddedRunCount.value = 0;
+      await vi.advanceTimersByTimeAsync(500).catch(() => {});
+      vi.useRealTimers();
+      await reload?.catch(() => {});
+    }
+
+    expect(logReload.warn).not.toHaveBeenCalledWith(expect.stringContaining("(discord)"));
+    expect(reloadPlugins).toHaveBeenCalledOnce();
+  });
+
   it("requires a recovery owner for targeted account reloads", async () => {
     const { applyHotReload } = createReloadHandlersForTest(
       undefined,

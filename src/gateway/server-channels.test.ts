@@ -25,6 +25,7 @@ import {
   runtimeForLogger,
 } from "../logging/subsystem.js";
 import { registerPluginCommandInRegistry } from "../plugins/command-registration.js";
+import { registerPluginHttpRoute } from "../plugins/http-registry.js";
 import { createPluginCommandRuntime } from "../plugins/plugin-command-runtime.js";
 import { createEmptyPluginRegistry, type PluginRegistry } from "../plugins/registry.js";
 import { getActivePluginRegistry, setActivePluginRegistry } from "../plugins/runtime.js";
@@ -1943,7 +1944,7 @@ describe("server-channels auto restart", () => {
     await manager.startChannel("discord", DEFAULT_ACCOUNT_ID);
     await manager.startChannel("discord", DEFAULT_ACCOUNT_ID);
     expect(startAccount).toHaveBeenCalledTimes(2);
-    expect(manager.getPluginCommandCatalogAccounts().get("discord")).toEqual(
+    expect(manager.getPluginRegistryDependentAccounts().get("discord")).toEqual(
       new Set([DEFAULT_ACCOUNT_ID]),
     );
 
@@ -1955,7 +1956,7 @@ describe("server-channels auto restart", () => {
     expect(account?.running).toBe(true);
     expect(account?.restartPending).toBe(false);
     expect(account?.lastError).toBeNull();
-    expect(manager.getPluginCommandCatalogAccounts().get("discord")).toEqual(
+    expect(manager.getPluginRegistryDependentAccounts().get("discord")).toEqual(
       new Set([DEFAULT_ACCOUNT_ID]),
     );
     expect(hoisted.sleepWithAbort).not.toHaveBeenCalled();
@@ -2668,19 +2669,54 @@ describe("server-channels auto restart", () => {
       "expected both account tasks to start",
     );
 
-    const reported = manager.getPluginCommandCatalogAccounts();
+    const reported = manager.getPluginRegistryDependentAccounts();
     expect(reported).toEqual(new Map([["discord", new Set(["catalog"])]]));
     (reported.get("discord") as Set<string>).clear();
-    expect(manager.getPluginCommandCatalogAccounts()).toEqual(
+    expect(manager.getPluginRegistryDependentAccounts()).toEqual(
       new Map([["discord", new Set(["catalog"])]]),
     );
 
     await manager.stopChannel("discord", "plain");
-    expect(manager.getPluginCommandCatalogAccounts()).toEqual(
+    expect(manager.getPluginRegistryDependentAccounts()).toEqual(
       new Map([["discord", new Set(["catalog"])]]),
     );
     await manager.stopChannel("discord", "catalog");
-    expect(manager.getPluginCommandCatalogAccounts()).toEqual(new Map());
+    expect(manager.getPluginRegistryDependentAccounts()).toEqual(new Map());
+  });
+
+  it("reports a running account that registered a dynamic plugin HTTP route", async () => {
+    const startAccount = vi.fn(
+      async ({ abortSignal }: { abortSignal: AbortSignal }) =>
+        await new Promise<void>((resolve) => {
+          const unregister = registerPluginHttpRoute({
+            path: "/mattermost/interactions/default",
+            auth: "plugin",
+            pluginId: "mattermost",
+            source: "mattermost-interactions",
+            handler: () => true,
+          });
+          abortSignal.addEventListener(
+            "abort",
+            () => {
+              unregister();
+              resolve();
+            },
+            { once: true },
+          );
+        }),
+    );
+    installTestRegistry(createTestPlugin({ id: "mattermost", startAccount }));
+    const manager = createManager({ channelIds: ["mattermost"] });
+
+    await manager.startChannels();
+    await waitForMicrotaskCondition(
+      () => startAccount.mock.calls.length === 1,
+      "expected the Mattermost account task to start",
+    );
+
+    expect(manager.getPluginRegistryDependentAccounts()).toEqual(
+      new Map([["mattermost", new Set([DEFAULT_ACCOUNT_ID])]]),
+    );
   });
 
   it("cancels a pending startup when the account is stopped mid-boot", async () => {

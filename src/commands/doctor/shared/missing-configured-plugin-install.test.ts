@@ -141,6 +141,7 @@ const mocks = vi.hoisted(() => ({
   validatePluginId: vi.fn(() => null),
   resolveProviderInstallCatalogEntries: vi.fn(),
   updateNpmInstalledPlugins: vi.fn(),
+  commitPluginInstallRecordsOnly: vi.fn(),
   writePersistedInstalledPluginIndexInstallRecords: vi.fn(),
 }));
 
@@ -235,6 +236,10 @@ vi.mock("../../../plugins/installed-plugin-index-records.js", () => ({
   loadInstalledPluginIndexInstallRecords: mocks.loadInstalledPluginIndexInstallRecords,
   writePersistedInstalledPluginIndexInstallRecords:
     mocks.writePersistedInstalledPluginIndexInstallRecords,
+}));
+
+vi.mock("../../../plugins/install-record-commit.js", () => ({
+  commitPluginInstallRecordsOnly: mocks.commitPluginInstallRecordsOnly,
 }));
 
 vi.mock("../../../plugins/installed-plugin-index.js", async (importOriginal) => ({
@@ -653,6 +658,18 @@ describe("repairMissingConfiguredPluginInstalls", () => {
       onBeforePluginArtifactCommit: async () => {},
       applyAcceptedSurface: (_pluginId, record) => record,
     });
+    mocks.commitPluginInstallRecordsOnly.mockImplementation(
+      async (params: {
+        nextInstallRecords: Record<string, unknown>;
+        nextConfig: OpenClawConfig;
+        env?: NodeJS.ProcessEnv;
+      }) => {
+        await mocks.writePersistedInstalledPluginIndexInstallRecords(params.nextInstallRecords, {
+          config: params.nextConfig,
+          env: params.env,
+        });
+      },
+    );
     mocks.loadPluginMetadataSnapshot.mockReturnValue({
       plugins: [],
       diagnostics: [],
@@ -1652,6 +1669,12 @@ describe("repairMissingConfiguredPluginInstalls", () => {
         env: {},
       },
     );
+    expect(mocks.commitPluginInstallRecordsOnly).toHaveBeenCalledWith({
+      previousInstallRecords: records,
+      nextInstallRecords: {},
+      nextConfig: expect.any(Object),
+      env: {},
+    });
     expect(result).toEqual({
       changes: ['Removed stale managed install record for bundled plugin "matrix".'],
       warnings: [],

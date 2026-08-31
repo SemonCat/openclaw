@@ -5,7 +5,6 @@ import type { OpenClawConfig } from "../config/types.openclaw.js";
 import { redactToolPayloadTextWithConfig } from "../logging/redact.js";
 import type { RegisteredPluginCommand } from "./command-registry-state.js";
 import { resolveManifestCommandAliasOwnerInRegistry } from "./manifest-command-aliases.js";
-import { retainPluginCommandCatalogForCurrentAccount } from "./plugin-command-account-start-scope.js";
 import {
   PLUGIN_COMMAND_DISPATCH,
   type PluginCommandReplyOptions,
@@ -19,6 +18,7 @@ import {
   listRegisteredPluginCommands,
   resolveSelectedPluginCommandRegistry,
 } from "./plugin-command-registry.js";
+import { retainPluginRegistryForCurrentAccount } from "./plugin-registry-account-start-scope.js";
 import { isPluginRegistryRetired } from "./registry-lifecycle.js";
 import type { PluginRecord, PluginRegistry } from "./registry-types.js";
 import type { PluginCommandContext, PluginCommandResult } from "./types.js";
@@ -248,7 +248,7 @@ export function createPluginCommandRuntime(): PluginCommandRuntime {
       if (!state.commands.some((command) => pluginCommandSupportsChannel(command, channel))) {
         return;
       }
-      retainPluginCommandCatalogForCurrentAccount(channel);
+      retainPluginRegistryForCurrentAccount(channel);
     },
   });
   runtimeStates.set(runtime, state);

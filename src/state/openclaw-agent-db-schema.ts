@@ -536,11 +536,26 @@ export function assertAgentDatabaseIntegrityBeforeMutation(
       hasPendingSessionTranscriptContextEligibilityColumn(database) ||
       hasPendingSessionProjectColumn(database));
   if (userVersion === OPENCLAW_AGENT_SCHEMA_VERSION && !hasPendingCurrentVersionMigration) {
-    verifyAndRepairCanonicalSqliteIndexes(database, pathname, OPENCLAW_AGENT_SCHEMA_SQL, {
+    const repairOptions = {
       allowMissingColumns: true,
       validateAfterRepair: () =>
         assertOpenClawAgentCurrentRuntimeSchema(database, { agentId, pathname }),
-    });
+    };
+    if (process.env.OPENCLAW_FAST_AGENT_DB_OPEN === "1") {
+      // Local latency mode: keep schema/index-definition validation synchronous,
+      // but leave full b-tree verification to the isolated daily verifier.
+      repairCanonicalSqliteIndexes(database, pathname, OPENCLAW_AGENT_SCHEMA_SQL, {
+        ...repairOptions,
+        verifyPhysicalIntegrity: false,
+      });
+    } else {
+      verifyAndRepairCanonicalSqliteIndexes(
+        database,
+        pathname,
+        OPENCLAW_AGENT_SCHEMA_SQL,
+        repairOptions,
+      );
+    }
   } else {
     // Every physical open proves the full file before schema mutation or exposure.
     assertSqliteIntegrity(database, pathname);

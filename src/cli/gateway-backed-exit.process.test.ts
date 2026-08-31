@@ -33,6 +33,7 @@ const UNREACHABLE_GATEWAY_URL = "ws://127.0.0.1:9";
 // A one-shot command must release its Gateway socket once its output is complete.
 // The clock starts at the complete payload, so cold startup never enters this budget.
 const ONE_SHOT_EXIT_BUDGET_MS = 5_000;
+const EMPTY_FILE_SNAPSHOT = `file:${createHash("sha256").update("").digest("hex")}`;
 afterEach(async () => {
   await closeActiveGatewayServers();
 });
@@ -270,6 +271,30 @@ describe("gateway-backed CLI process exit", () => {
       expectUnreachableGatewayTransportFailure(result, output);
       expect(await snapshotSharedStateArtifacts(fixture.stateDir)).toEqual(before);
     },
+  );
+
+  it.each([
+    { label: "plugins-list", args: ["plugins", "list", "--json"], expectedCode: 0 },
+    {
+      label: "plugins-inspect",
+      args: ["plugins", "inspect", "acpx", "--json"],
+      expectedCode: 1,
+    },
+  ])(
+    "leaves the shared database unchanged after $label",
+    async ({ label, args, expectedCode }) => {
+      const fixture = await prepareUnreachableGatewayCliFixture({ label, seeded: true });
+      const before = await snapshotSharedStateArtifacts(fixture.stateDir);
+      expect(before["openclaw.sqlite"]).toMatch(/^file:/u);
+
+      const result = await runIsolatedGatewayCli({ ...fixture, args });
+
+      expect(result).toMatchObject({ code: expectedCode, signal: null });
+      const after = await snapshotSharedStateArtifacts(fixture.stateDir);
+      expect(after["openclaw.sqlite"]).toBe(before["openclaw.sqlite"]);
+      expect(after["openclaw.sqlite-wal"]).toBe(EMPTY_FILE_SNAPSHOT);
+    },
+    30_000,
   );
 
   it("dispatches node pairing mutations without opening the writable state database", async () => {

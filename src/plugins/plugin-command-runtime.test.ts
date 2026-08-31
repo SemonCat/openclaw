@@ -8,13 +8,13 @@ vi.mock("./host-hook-cleanup.js", () => ({ cleanupReplacedPluginHostRegistry }))
 import { getPluginCommandExecutionCount } from "./command-execution-lock.js";
 import { registerPluginCommandInRegistry } from "./command-registration.js";
 import { createPluginRecord } from "./loader-records.js";
-import { withPluginCommandAccountStartScope } from "./plugin-command-account-start-scope.js";
 import {
   createPluginCommandRuntime,
   executePluginCommandDispatch,
   matchPluginCommandInvocation,
   type PluginCommandDispatch,
 } from "./plugin-command-runtime.js";
+import { withPluginRegistryAccountStartScope } from "./plugin-registry-account-start-scope.js";
 import { createEmptyPluginRegistry } from "./registry-empty.js";
 import { markPluginRegistryRetired } from "./registry-lifecycle.js";
 import {
@@ -327,10 +327,13 @@ describe("plugin command runtime", () => {
     const retainCatalog = vi.fn();
 
     runtime.retainNativeCatalog("telegram");
-    withPluginCommandAccountStartScope({ channelId: "telegram", retainCatalog }, () => {
-      runtime.retainNativeCatalog("discord");
-      runtime.retainNativeCatalog("telegram");
-    });
+    withPluginRegistryAccountStartScope(
+      { channelId: "telegram", retainRegistry: retainCatalog },
+      () => {
+        runtime.retainNativeCatalog("discord");
+        runtime.retainNativeCatalog("telegram");
+      },
+    );
 
     expect(retainCatalog).toHaveBeenCalledOnce();
     markPluginRegistryRetired(registry);

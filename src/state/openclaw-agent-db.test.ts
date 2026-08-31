@@ -837,6 +837,7 @@ afterAll(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   closeOpenClawAgentDatabasesForTest();
   closeOpenClawStateDatabaseForTest();
 });
@@ -4599,6 +4600,18 @@ describe("openclaw agent database", () => {
     expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).toThrow(
       /integrity_check failed.*missing from index unsafe_index_records_value/iu,
     );
+  });
+
+  it("leaves physical index verification to the background verifier in fast-open mode", () => {
+    const stateDir = createTempStateDir();
+    const env = { OPENCLAW_STATE_DIR: stateDir };
+    const databasePath = openOpenClawAgentDatabase({ agentId: "worker-1", env }).path;
+    closeOpenClawAgentDatabasesForTest();
+    closeOpenClawStateDatabaseForTest();
+    createUnsafeIndexDrift(databasePath);
+    vi.stubEnv("OPENCLAW_FAST_AGENT_DB_OPEN", "1");
+
+    expect(() => openOpenClawAgentDatabase({ agentId: "worker-1", env })).not.toThrow();
   });
 
   it("rechecks integrity after a validated handle is physically reopened", () => {

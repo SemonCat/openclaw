@@ -2,7 +2,7 @@
 import { getTerminalTableWidth, renderTable } from "../../packages/terminal-core/src/table.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
 import { listAgentIds } from "../agents/agent-scope-config.js";
-import { getRuntimeConfig } from "../config/config.js";
+import { getRuntimeConfig, getRuntimeConfigForInspection } from "../config/config.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import { resolvePluginControlPlaneWorkspace } from "../plugins/control-plane-workspace.js";
 import { resolveInstalledPluginPackageOwnership } from "../plugins/installed-plugin-package-ownership.js";
@@ -128,9 +128,15 @@ export async function runPluginsInspectCommand(
     formatPluginCompatibilityNotice,
   } = await import("../plugins/status.js");
   const { loadPluginMetadataSnapshot } = await import("../plugins/plugin-metadata-snapshot.js");
-  const cfg = tracePluginLifecyclePhase("config read", () => getRuntimeConfig(), {
-    command: "inspect",
-  });
+  const runtimeInspect = opts.runtime === true;
+  const cfg = tracePluginLifecyclePhase(
+    "config read",
+    () =>
+      runtimeInspect
+        ? getRuntimeConfig()
+        : getRuntimeConfigForInspection({ skipPluginValidation: true }),
+    { command: "inspect" },
+  );
   const { workspaceDir } = resolvePluginControlPlaneWorkspace({ config: cfg });
   const metadataSnapshot = tracePluginLifecyclePhase(
     "plugin metadata load",
@@ -144,7 +150,6 @@ export async function runPluginsInspectCommand(
     return ownership.ok ? ownership.value.installRecord : undefined;
   };
   const loggerParams = opts.json ? { logger: quietPluginJsonLogger } : {};
-  const runtimeInspect = opts.runtime === true;
   const reportParams = { config: cfg, metadataSnapshot, ...loggerParams };
   const runtimeReportParams = {
     ...reportParams,

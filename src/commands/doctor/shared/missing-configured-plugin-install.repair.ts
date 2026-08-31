@@ -8,7 +8,7 @@ import {
   normalizePluginsConfig,
   resolveEffectiveEnableState,
 } from "../../../plugins/config-state.js";
-import { writePersistedInstalledPluginIndexInstallRecords } from "../../../plugins/installed-plugin-index-records.js";
+import { commitPluginInstallRecordsOnly } from "../../../plugins/install-record-commit.js";
 import { withPluginLifecycleLease } from "../../../plugins/plugin-lifecycle-lease.js";
 import { updateNpmInstalledPlugins } from "../../../plugins/update.js";
 import { resolveUserPath } from "../../../utils.js";
@@ -401,16 +401,25 @@ async function repairMissingPluginInstallsWithLease(
     }
   }
 
-  const persistedIndexOptions = { config: params.cfg, env };
   if (nextRecords !== records) {
-    await writePersistedInstalledPluginIndexInstallRecords(nextRecords, persistedIndexOptions);
+    await commitPluginInstallRecordsOnly({
+      previousInstallRecords: records,
+      nextInstallRecords: nextRecords,
+      nextConfig: params.cfg,
+      env,
+    });
   } else if (params.baselineRecords) {
     // The caller seeded us from in-memory state that may not yet have been
     // persisted (e.g. earlier sync/npm record mutations). Even if repair
     // itself made no further changes, persist the baseline so the disk
     // matches what we are about to return — otherwise the next reader gets
     // a stale snapshot.
-    await writePersistedInstalledPluginIndexInstallRecords(nextRecords, persistedIndexOptions);
+    await commitPluginInstallRecordsOnly({
+      previousInstallRecords: records,
+      nextInstallRecords: nextRecords,
+      nextConfig: params.cfg,
+      env,
+    });
   }
   const pluginInventoryChanged = nextRecords !== records || repairedPluginIds.size > 0;
   return {

@@ -34,7 +34,7 @@ import {
   type SubsystemLogger,
 } from "../logging/subsystem.js";
 import { withPluginHttpRouteRegistry } from "../plugins/http-registry.js";
-import { withPluginCommandAccountStartScope } from "../plugins/plugin-command-account-start-scope.js";
+import { withPluginRegistryAccountStartScope } from "../plugins/plugin-registry-account-start-scope.js";
 import type { PluginRegistry } from "../plugins/registry.js";
 import type { PluginRuntimeChannel } from "../plugins/runtime/types-channel.js";
 import { runOutsideGatewayRootWorkAdmission } from "../process/gateway-work-admission.js";
@@ -80,8 +80,8 @@ function waitForChannelStartupHandoff(): Promise<void> {
 type ChannelRuntimeStore = {
   aborts: Map<string, AbortController>;
   // The account task's controller is the ownership token: late predecessor cleanup
-  // must not clear a catalog retained by its replacement.
-  pluginCommandCatalogOwners: Map<string, AbortController>;
+  // must not clear registry dependencies retained by its replacement.
+  pluginRegistryOwners: Map<string, AbortController>;
   starting: Map<string, Promise<void>>;
   stops: Map<string, ChannelAccountStopState>;
   tasks: Map<string, Promise<unknown>>;
@@ -142,7 +142,7 @@ type GatewayStartupTrace = {
 function createRuntimeStore(): ChannelRuntimeStore {
   return {
     aborts: new Map(),
-    pluginCommandCatalogOwners: new Map(),
+    pluginRegistryOwners: new Map(),
     starting: new Map(),
     stops: new Map(),
     tasks: new Map(),
@@ -278,7 +278,7 @@ async function waitForDeferredAccountStart(
 
 export type ChannelManager = {
   getRuntimeSnapshot: () => ChannelRuntimeSnapshot;
-  getPluginCommandCatalogAccounts: () => ReadonlyMap<ChannelId, ReadonlySet<string>>;
+  getPluginRegistryDependentAccounts: () => ReadonlyMap<ChannelId, ReadonlySet<string>>;
   startChannels: () => Promise<void>;
   startChannel: (
     channel: ChannelId,
@@ -335,15 +335,15 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
   );
 
   const restartKey = (channelId: ChannelId, accountId: string) => `${channelId}:${accountId}`;
-  const clearPluginCommandCatalogOwner = (
+  const clearPluginRegistryOwner = (
     store: ChannelRuntimeStore,
     accountId: string,
     owner?: AbortController,
   ): void => {
-    if (owner && store.pluginCommandCatalogOwners.get(accountId) !== owner) {
+    if (owner && store.pluginRegistryOwners.get(accountId) !== owner) {
       return;
     }
-    store.pluginCommandCatalogOwners.delete(accountId);
+    store.pluginRegistryOwners.delete(accountId);
   };
   const ensureChannelLog = (channelId: ChannelId): SubsystemLogger => {
     channelLogs[channelId] ??= createSubsystemLogger("channels").child(channelId);
@@ -515,7 +515,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
       }
       store.runtimes.delete(id);
       clearActiveCredentialDegradedOwner("account", restartKey(channelId, normalizeAccountId(id)));
-      store.pluginCommandCatalogOwners.delete(id);
+      store.pluginRegistryOwners.delete(id);
       restarts.delete(restartKey(channelId, id));
       manuallyStopped.delete(restartKey(channelId, id));
       recoveryStartRequested.delete(restartKey(channelId, id));
@@ -656,7 +656,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
         // cannot race into duplicate provider boots for the same account.
         const abort = new AbortController();
         store.aborts.set(id, abort);
-        clearPluginCommandCatalogOwner(store, id);
+        clearPluginRegistryOwner(store, id);
         let handedOffTask = false;
         let startAccountLifetimeActive = false;
         const log = ensureChannelLog(channelId);
@@ -881,9 +881,9 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
                 const recordDuration = () => {
                   channelRunDurationMs = Date.now() - startedAt;
                   startAccountLifetimeActive = false;
-                  clearPluginCommandCatalogOwner(store, id, abort);
+                  clearPluginRegistryOwner(store, id, abort);
                 };
-                const retainCatalog = () => {
+                const retainRegistry = () => {
                   if (
                     !startAccountLifetimeActive ||
                     abort.signal.aborted ||
@@ -892,11 +892,11 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
                   ) {
                     return;
                   }
-                  store.pluginCommandCatalogOwners.set(id, abort);
+                  store.pluginRegistryOwners.set(id, abort);
                 };
                 try {
                   startAccountLifetimeActive = true;
-                  return withPluginCommandAccountStartScope({ channelId, retainCatalog }, () =>
+                  return withPluginRegistryAccountStartScope({ channelId, retainRegistry }, () =>
                     withGatewayNativeApprovalRuntime(opts.getNativeApprovalRuntime?.(), () =>
                       startAccount({
                         cfg,
@@ -1300,7 +1300,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
                 ...stoppedPatch,
               });
             } else {
-              clearPluginCommandCatalogOwner(store, id, abort);
+              clearPluginRegistryOwner(store, id, abort);
               setStoppedRuntime(channelId, id, stoppedPatch);
               recoveryStopTimedOut.add(rKey);
             }
@@ -1308,7 +1308,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
           }
           recoveryStopTimedOut.delete(rKey);
           recoveryStartRequested.delete(rKey);
-          clearPluginCommandCatalogOwner(store, id, abort);
+          clearPluginRegistryOwner(store, id, abort);
           if (store.aborts.get(id) === abort) {
             store.aborts.delete(id);
           }
@@ -1464,11 +1464,11 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
     return { channels, channelAccounts };
   };
 
-  const getPluginCommandCatalogAccounts = (): ReadonlyMap<ChannelId, ReadonlySet<string>> =>
+  const getPluginRegistryDependentAccounts = (): ReadonlyMap<ChannelId, ReadonlySet<string>> =>
     new Map(
       [...channelStores]
-        .filter(([, store]) => store.pluginCommandCatalogOwners.size > 0)
-        .map(([channelId, store]) => [channelId, new Set(store.pluginCommandCatalogOwners.keys())]),
+        .filter(([, store]) => store.pluginRegistryOwners.size > 0)
+        .map(([channelId, store]) => [channelId, new Set(store.pluginRegistryOwners.keys())]),
     );
 
   const isManuallyStoppedFlag = (channelId: ChannelId, accountId: string): boolean => {
@@ -1485,7 +1485,7 @@ export function createChannelManager(opts: ChannelManagerOptions): ChannelManage
 
   return {
     getRuntimeSnapshot,
-    getPluginCommandCatalogAccounts,
+    getPluginRegistryDependentAccounts,
     startChannels,
     startChannel,
     startChannelAccountForRecovery,

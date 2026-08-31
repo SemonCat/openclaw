@@ -169,6 +169,7 @@ function resolveRetainedManagedNpmInstallMarkerTarget(params: {
   pluginId: string;
   previousRecord?: PluginInstallRecord;
   nextRecord?: PluginInstallRecord;
+  env?: NodeJS.ProcessEnv;
 }): string | null {
   if (params.previousRecord?.source !== "npm") {
     return null;
@@ -191,7 +192,7 @@ function resolveRetainedManagedNpmInstallMarkerTarget(params: {
       return null;
     }
     try {
-      const configuredNpmRoot = path.resolve(resolveDefaultPluginNpmDir());
+      const configuredNpmRoot = path.resolve(resolveDefaultPluginNpmDir(params.env));
       const npmRoot = fs.realpathSync(configuredNpmRoot);
       const configuredProjectRoot = path.resolve(packageInfo.projectRoot);
       const projectRoot = fs.realpathSync(configuredProjectRoot);
@@ -268,6 +269,7 @@ async function markRetiredManagedNpmInstallRecords(params: {
   previousInstallRecords: Record<string, PluginInstallRecord>;
   nextInstallRecords: Record<string, PluginInstallRecord>;
   createdMarkerPaths: string[];
+  env?: NodeJS.ProcessEnv;
 }): Promise<void> {
   const markedPreviousPluginIds = new Set<string>();
   const activeInstallPaths = Object.values(params.nextInstallRecords).flatMap((record) => {
@@ -292,6 +294,7 @@ async function markRetiredManagedNpmInstallRecords(params: {
       pluginId,
       previousRecord,
       nextRecord,
+      ...(params.env ? { env: params.env } : {}),
     });
     if (!packageDir) {
       return;
@@ -443,12 +446,13 @@ async function commitPluginInstallRecordsWithWriter(params: {
   nextConfig: OpenClawConfig;
   recheckStagedActivation?: boolean;
   writeOptions?: ConfigWriteOptions;
+  env?: NodeJS.ProcessEnv;
   commit: ConfigCommit;
 }): Promise<{
   committed: ConfigReplaceResult | void;
   nextInstallRecords: Record<string, PluginInstallRecord>;
 }> {
-  return await withPluginLifecycleLease({}, async (lease) => {
+  return await withPluginLifecycleLease(params.env ? { env: params.env } : {}, async (lease) => {
     let tentativeWrite: InstalledPluginIndexWriteReceipt | undefined;
     const retainedMarkerPaths: string[] = [];
     const clearedMarkerSnapshots: Array<{ markerPath: string; contents: string }> = [];
@@ -482,6 +486,7 @@ async function commitPluginInstallRecordsWithWriter(params: {
         nextInstallRecords: prepared.nextInstallRecords,
         // Keep partial progress visible to the rollback path.
         createdMarkerPaths: retainedMarkerPaths,
+        ...(params.env ? { env: params.env } : {}),
       });
       await clearActiveRetainedManagedNpmInstallMarkers(
         prepared.nextInstallRecords,
@@ -569,6 +574,7 @@ export async function commitPluginInstallRecordsOnly(params: {
   previousInstallRecords?: Record<string, PluginInstallRecord>;
   nextInstallRecords: Record<string, PluginInstallRecord>;
   nextConfig: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
   verifyConfigFresh?: () => Promise<void>;
 }): Promise<void> {
   await commitPluginInstallRecordsWithWriter({
@@ -579,6 +585,7 @@ export async function commitPluginInstallRecordsOnly(params: {
       nextInstallRecords: params.nextInstallRecords,
     }),
     nextConfig: params.nextConfig,
+    ...(params.env ? { env: params.env } : {}),
     commit: async () => {
       await params.verifyConfigFresh?.();
       return undefined;
