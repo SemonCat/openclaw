@@ -109,6 +109,23 @@ describe("captureCodexSettledTurnFinalizationContext", () => {
     expect(context?.messages).not.toBe(historyMessages);
   });
 
+  it("accepts an attested prompt retained from the pre-recovery turn", async () => {
+    const settledMessages = settledTurn();
+    settledMessages[0] = message(
+      { role: "user", content: "Send it." },
+      "turn-before-restart:prompt",
+    );
+
+    const context = await captureContext({
+      historyMessages: settledMessages,
+      mirroredMessages: settledMessages,
+      settledMessages,
+      turnId: "turn-2",
+    });
+
+    expect(context).toEqual({ source: "openclaw-transcript", messages: settledMessages });
+  });
+
   it("adopts an exact host-persisted prompt without rewriting its canonical metadata", async () => {
     const { persistedPrompt, ...turn } = settledHostPromptTurn();
 
