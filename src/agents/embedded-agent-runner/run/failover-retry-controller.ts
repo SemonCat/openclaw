@@ -231,7 +231,7 @@ export function createEmbeddedRunFailoverRetryController(input: {
       retryAfterSeconds?: number;
     }): Promise<boolean> => {
       if (
-        rateLimitProfileRotations >= rateLimitProfileRotationLimit ||
+        rateLimitProfileRotations > 0 ||
         consecutiveSameModelRateLimitRetries >= MAX_SAME_MODEL_RATE_LIMIT_RETRIES
       ) {
         return false;

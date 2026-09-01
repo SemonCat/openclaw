@@ -40,7 +40,7 @@ export const RUNTIME_AUTH_REFRESH_MIN_DELAY_MS = 5 * 1000;
 
 const DEFAULT_OVERLOAD_FAILOVER_BACKOFF_MS = 0;
 const DEFAULT_MAX_OVERLOAD_PROFILE_ROTATIONS = 1;
-const DEFAULT_MAX_RATE_LIMIT_PROFILE_ROTATIONS = 1;
+const DEFAULT_MAX_RATE_LIMIT_PROFILE_ROTATIONS = 3;
 
 // Same-model in-place rate_limit retry: provider RPM caps reset on a
 // minute scale, so wait out the current provider/model window before spending
