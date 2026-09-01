@@ -87,10 +87,12 @@ describe("createEmbeddedRunFailoverRetryController", () => {
     expect(mocks.sleepWithAbort).toHaveBeenCalledWith(10_000, undefined);
   });
 
-  it("escalates after one successful rate-limit rotation without advancing again", async () => {
+  it("tries all four configured profiles before escalating to model fallback", async () => {
     const advanceAuthProfile = vi.fn(async () => true);
     const controller = createController(advanceAuthProfile, true);
 
+    await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).resolves.toBe(true);
+    await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).resolves.toBe(true);
     await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).resolves.toBe(true);
     await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).rejects.toMatchObject({
       name: "FailoverError",
@@ -101,7 +103,7 @@ describe("createEmbeddedRunFailoverRetryController", () => {
       FailoverError,
     );
 
-    expect(advanceAuthProfile).toHaveBeenCalledTimes(1);
+    expect(advanceAuthProfile).toHaveBeenCalledTimes(3);
     expect(rateLimitContext.logFallbackDecision).toHaveBeenCalledTimes(2);
     expect(rateLimitContext.logFallbackDecision).toHaveBeenNthCalledWith(1, "fallback_model", {
       status: 429,
