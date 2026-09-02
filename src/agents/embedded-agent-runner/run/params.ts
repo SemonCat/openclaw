@@ -272,6 +272,8 @@ export type RunEmbeddedAgentParams = {
   modelFallbacksOverride?: string[];
   /** Prepared fallback availability fact shared by selection and failure reporting. */
   modelFallbackAvailability?: ModelFallbackAvailability;
+  /** Requests a continuation-only prompt when settled tools precede outer model fallback. */
+  onSettledTranscriptModelFallback?: () => void;
   /** Session-pinned embedded harness id. Prevents runtime hot-switching. */
   agentHarnessId?: string;
   /** True when the pinned non-default harness owns model selection for this session. */

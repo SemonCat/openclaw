@@ -297,11 +297,18 @@ export function resolveFallbackRetryPrompt(params: {
   isFallbackRetry: boolean;
   sessionHasHistory?: boolean;
   priorContextPrelude?: string;
+  continueFromSettledTranscript?: boolean;
 }): string {
   if (!params.isFallbackRetry) {
     return params.body;
   }
   const prelude = params.priorContextPrelude?.trim();
+  if (params.continueFromSettledTranscript) {
+    const continuation =
+      "Continue from the current transcript after the latest tool result. " +
+      "Do not repeat the original user request, and do not rerun completed tools unless the transcript shows they are still needed.";
+    return prelude ? `${prelude}\n\n${continuation}` : continuation;
+  }
   if (!params.sessionHasHistory && !prelude) {
     return params.body;
   }
