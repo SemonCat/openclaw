@@ -151,6 +151,8 @@ type ReplyTurnAdmissionParams = {
   allowRestartTombstoneReset?: boolean;
   routeThreadId?: string | number;
   originatingLeafEntryId?: string | null;
+  /** Durable channel source attempting to enter a session with an interrupted source claim. */
+  sourceTurnId?: string;
   /**
    * Move this already-held operation into sessionKey's run slot instead of
    * creating a new one. Used when a native command turn (admitted under its
@@ -278,6 +280,23 @@ export async function admitReplyTurn(
                   message: archivedSessionError,
                   restartRecoveryTombstone: isRestartRecoveryTombstone(currentEntry),
                 });
+              }
+              const activeRecoverySourceTurnId =
+                currentEntry?.restartRecoveryDeliverySourceRunId?.trim();
+              if (
+                params.kind === "visible" &&
+                params.sourceTurnId &&
+                activeRecoverySourceTurnId &&
+                params.sourceTurnId !== activeRecoverySourceTurnId &&
+                currentEntry?.status === "running" &&
+                currentEntry.abortedLastRun === true
+              ) {
+                // A provider-spooled turn can race startup recovery before the
+                // interrupted owner has re-entered the process-local reply registry.
+                // Do not let that newer turn acquire a foreground recovery claim:
+                // runReplyAgent would reject the older source claim after admission,
+                // leaving the session marked healthy/running with no actual owner.
+                throw new Error("restart recovery claim changed before reply admission");
               }
               sessionId = currentEntry?.sessionId ?? sessionId;
             },
