@@ -114,6 +114,7 @@ import {
   claudeCliSessionTranscriptHasContent,
   resolveFallbackRetryPrompt,
 } from "./attempt-execution.helpers.js";
+import type { AgentFallbackRuntimeState } from "./attempt-execution.shared.js";
 import { resolveAgentRunContext } from "./run-context.js";
 import {
   clearCliSessionInStore,
@@ -595,7 +596,7 @@ export function runAgentAttempt(params: {
   allowTransientCooldownProbe?: boolean;
   modelFallbacksOverride?: string[];
   sessionHasHistory?: boolean;
-  fallbackRuntimeState?: { originRuntime?: "cli" | "embedded" };
+  fallbackRuntimeState?: AgentFallbackRuntimeState;
   suppressPromptPersistenceOnRetry?: boolean;
   userTurnTranscriptRecorder?: UserTurnTranscriptRecorder;
   contextEngineLogicalTurnLease?: ContextEngineLogicalTurnLease;
@@ -716,6 +717,7 @@ export function runAgentAttempt(params: {
     isFallbackRetry: params.isFallbackRetry,
     sessionHasHistory: params.sessionHasHistory,
     priorContextPrelude: claudeCliFallbackPrelude,
+    continueFromSettledTranscript: params.fallbackRuntimeState?.continueFromSettledTranscript,
   });
   const effectivePrompt = isRawModelRun
     ? resolvedPrompt
@@ -879,6 +881,7 @@ export function runAgentAttempt(params: {
           isFallbackRetry: params.isFallbackRetry,
           sessionHasHistory: params.sessionHasHistory,
           priorContextPrelude: claudeCliFallbackPrelude,
+          continueFromSettledTranscript: params.fallbackRuntimeState?.continueFromSettledTranscript,
         })
       : resolvedPrompt;
     const cliEffectivePrompt = params.opts.execApprovalContinuationPromptRange
@@ -1273,6 +1276,16 @@ export function runAgentAttempt(params: {
     modelHasVision: params.modelHasVision,
     modelThinkingCapability: params.modelThinkingCapability,
     modelFallbacksOverride: params.modelFallbacksOverride,
+    onSettledTranscriptModelFallback: params.fallbackRuntimeState
+      ? () => {
+          if (params.fallbackRuntimeState) {
+            // Keep this armed for the remaining model chain: until a model
+            // succeeds, the shared transcript still ends at the same settled
+            // tool boundary and replaying the original turn remains unsafe.
+            params.fallbackRuntimeState.continueFromSettledTranscript = true;
+          }
+        }
+      : undefined,
     authProfileId,
     authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
     thinkLevel: params.resolvedThinkLevel,
@@ -1329,6 +1342,8 @@ export function runAgentAttempt(params: {
     onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
     onDeferredLifecycleAbort: params.deferredLifecycle?.abort,
     suppressNextUserMessagePersistence: params.suppressPromptPersistenceOnRetry === true,
+    skipPreparedUserTurnMessage:
+      params.isFallbackRetry && params.fallbackRuntimeState?.continueFromSettledTranscript === true,
     userTurnTranscriptRecorder: params.userTurnTranscriptRecorder,
     contextEngineLogicalTurnLease: params.contextEngineLogicalTurnLease,
     onContextEngineTurnCandidate: params.onContextEngineTurnCandidate,

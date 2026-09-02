@@ -108,11 +108,7 @@ export async function handleAssistantFailover(params: {
   maybeRetrySameModelRateLimit: (retry?: ShortWindowRateLimitRetry) => Promise<boolean>;
   maybeBackoffBeforeOverloadFailover: (reason: FailoverReason | null) => Promise<void>;
   advanceAuthProfile: () => Promise<boolean>;
-  advanceRateLimitAuthProfile: (context: {
-    failoverProvider: string;
-    failoverModel: string;
-    logFallbackDecision: (decision: "fallback_model", extra?: { status?: number }) => void;
-  }) => Promise<boolean>;
+  advanceRateLimitAuthProfile: () => Promise<boolean>;
 }): Promise<AssistantFailoverOutcome> {
   const terminal = projectAgentRunAttemptTerminal(params.terminal);
   const externalAbort = terminal.externalAbort || params.signalOwnedInterruption;
@@ -202,11 +198,7 @@ export async function handleAssistantFailover(params: {
       if (shortWindowRetry && (await params.maybeRetrySameModelRateLimit(shortWindowRetry))) {
         return sameModelRateLimitRetry();
       }
-      rotated = await params.advanceRateLimitAuthProfile({
-        failoverProvider: params.activeErrorContext.provider,
-        failoverModel: params.activeErrorContext.model,
-        logFallbackDecision: params.logAssistantFailoverDecision,
-      });
+      rotated = await params.advanceRateLimitAuthProfile();
     } else {
       rotated = await params.advanceAuthProfile();
     }

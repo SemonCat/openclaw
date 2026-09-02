@@ -22,6 +22,9 @@ type TransportDropScenario = {
   transportDropContinuations?: number;
   terminal?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["terminal"];
   yieldDetected?: boolean;
+  promptError?: Error;
+  rateLimitRotationResult?: boolean;
+  onSettledTranscriptModelFallback?: () => void;
 };
 
 const disabledCompactionRuntime = {
@@ -80,7 +83,11 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
       completedCount: toolCalls.length,
       activeCount: scenario.activeCount ?? 0,
     },
-    ...(scenario.terminal ? { terminal: scenario.terminal } : {}),
+    ...(scenario.promptError
+      ? { terminal: { kind: "failed", source: "prompt", error: scenario.promptError } }
+      : scenario.terminal
+        ? { terminal: scenario.terminal }
+        : {}),
     ...(scenario.yieldDetected ? { yieldDetected: true } : {}),
   });
   const terminalState = resolveEmbeddedRunAttemptTerminalState({
@@ -92,11 +99,11 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
   const contextRecoveryState = createEmbeddedRunContextRecoveryState();
   contextRecoveryState.transportDropContinuations = scenario.transportDropContinuations ?? 0;
   const failoverRetryController = {
-    resolveAuthProfileFailureReason: vi.fn(),
+    resolveAuthProfileFailureReason: vi.fn(() => "rate_limit"),
     advanceAuthProfile: vi.fn(),
-    advanceRateLimitAuthProfile: vi.fn(),
-    maybeMarkAuthProfileFailure: vi.fn(),
-    maybeBackoffBeforeOverloadFailover: vi.fn(),
+    advanceRateLimitAuthProfile: vi.fn(async () => scenario.rateLimitRotationResult ?? true),
+    maybeMarkAuthProfileFailure: vi.fn(async () => {}),
+    maybeBackoffBeforeOverloadFailover: vi.fn(async () => {}),
   };
   const recovery = await recoverEmbeddedRunAttempt({
     runInput: {
@@ -105,21 +112,30 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
         agentId: "main",
         sessionId: "session:transport-drop",
         runId: "run:transport-drop",
+        onSettledTranscriptModelFallback: scenario.onSettledTranscriptModelFallback,
       },
       resolvedSessionKey: "agent:main:transport-drop",
+      agentDir: "/tmp/openclaw-attempt-recovery-test",
+      globalLane: "test",
+      fallbackConfigured: true,
       startedAtMs: Date.now(),
       laneController: { throwIfAborted: vi.fn() },
+      suspendForFailure: vi.fn(),
     },
     preparedRuntime: {
       provider: "openai",
       modelId: "gpt-5.6-luna",
       model: { id: "gpt-5.6-luna" },
       genericCompactionRecoveryAllowed: false,
+      attemptAuthProfileStore: { version: 1, profiles: {} },
+      maybeRefreshRuntimeAuthForAuthError: vi.fn(async () => false),
+      setThinkLevel: vi.fn(),
       snapshot: () => ({
         thinkLevel: "off",
         agentHarness: { id: "openclaw" },
         outerContextTokenMeta: {},
         pluginHarnessOwnsTransport: false,
+        lastProfileId: "openai:test-profile",
       }),
     },
     normalizedAttempt: {
@@ -192,6 +208,59 @@ describe("recoverEmbeddedRunAttempt", () => {
     expect(continueFromCurrentTranscript).toHaveBeenCalledWith({
       includeToolFailureInstruction: true,
     });
+  });
+
+  it("rotates profiles and continues from settled tools after a subscription limit", async () => {
+    const promptError = Object.assign(new Error("Codex subscription usage limit reached"), {
+      status: 429,
+    });
+    const {
+      recovery,
+      markOwnedTranscriptRetry,
+      continueFromCurrentTranscript,
+      failoverRetryController,
+    } = await recoverAfterTransportDrop({ promptError });
+
+    expect(recovery).toMatchObject({ action: "retry", lastRetryFailoverReason: "rate_limit" });
+    expect(failoverRetryController.advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
+    expect(markOwnedTranscriptRetry).toHaveBeenCalledTimes(1);
+    expect(continueFromCurrentTranscript).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([
+    ["a tool is still active", { activeCount: 1 }],
+    ["the attempt already yielded", { yieldDetected: true }],
+  ])("keeps subscription-limit rotation closed when %s", async (_label, scenario) => {
+    const promptError = Object.assign(new Error("Codex subscription usage limit reached"), {
+      status: 429,
+    });
+    const {
+      recovery,
+      markOwnedTranscriptRetry,
+      continueFromCurrentTranscript,
+      failoverRetryController,
+    } = await recoverAfterTransportDrop({ ...scenario, promptError });
+
+    expect(recovery).toEqual({ action: "proceed", shouldSurfaceCodexCompletionTimeout: false });
+    expect(failoverRetryController.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
+    expect(markOwnedTranscriptRetry).not.toHaveBeenCalled();
+    expect(continueFromCurrentTranscript).not.toHaveBeenCalled();
+  });
+
+  it("arms transcript continuation before model fallback after profiles are exhausted", async () => {
+    const promptError = Object.assign(new Error("Codex subscription usage limit reached"), {
+      status: 429,
+    });
+    const onSettledTranscriptModelFallback = vi.fn();
+
+    await expect(
+      recoverAfterTransportDrop({
+        promptError,
+        rateLimitRotationResult: false,
+        onSettledTranscriptModelFallback,
+      }),
+    ).rejects.toMatchObject({ reason: "rate_limit", status: 429 });
+    expect(onSettledTranscriptModelFallback).toHaveBeenCalledTimes(1);
   });
 
   it.each([0, 1])(
