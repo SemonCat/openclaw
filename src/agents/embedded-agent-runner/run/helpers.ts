@@ -39,7 +39,6 @@ export const RUNTIME_AUTH_REFRESH_RETRY_MS = 60 * 1000;
 export const RUNTIME_AUTH_REFRESH_MIN_DELAY_MS = 5 * 1000;
 
 const DEFAULT_MAX_OVERLOAD_PROFILE_ROTATIONS = 1;
-const DEFAULT_MAX_RATE_LIMIT_PROFILE_ROTATIONS = 1;
 
 export const MAX_TRANSIENT_RETRIES = 3;
 const MAX_TRANSIENT_RETRY_TIME_MS = 90_000;
@@ -48,10 +47,6 @@ const TRANSIENT_RETRY_MAX_DELAY_MS = 30_000;
 
 export function resolveOverloadProfileRotationLimit(): number {
   return DEFAULT_MAX_OVERLOAD_PROFILE_ROTATIONS;
-}
-
-export function resolveRateLimitProfileRotationLimit(): number {
-  return DEFAULT_MAX_RATE_LIMIT_PROFILE_ROTATIONS;
 }
 
 /** Resolves jittered exponential backoff without exceeding the turn retry ceiling. */

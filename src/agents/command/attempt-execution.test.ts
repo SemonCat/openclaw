@@ -60,6 +60,19 @@ describe("resolveFallbackRetryPrompt", () => {
     ).toBe(`[Retry after the previous model attempt failed or timed out]\n\n${originalBody}`);
   });
 
+  it("continues from settled transcript state without replaying the original task", () => {
+    const result = resolveFallbackRetryPrompt({
+      body: originalBody,
+      isFallbackRetry: true,
+      sessionHasHistory: true,
+      continueFromSettledTranscript: true,
+    });
+
+    expect(result).toContain("Continue from the current transcript after the latest tool result.");
+    expect(result).toContain("do not rerun completed tools");
+    expect(result).not.toContain(originalBody);
+  });
+
   it("preserves original body for fallback retry when sessionHasHistory is undefined", () => {
     expect(
       resolveFallbackRetryPrompt({

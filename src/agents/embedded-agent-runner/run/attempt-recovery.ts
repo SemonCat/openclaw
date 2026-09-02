@@ -4,6 +4,7 @@ import { isRetryableAssistantError } from "../../../llm/utils/retry.js";
 import { projectAgentRunAttemptTerminal } from "../../agent-run-terminal-outcome.js";
 import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../defaults.js";
 import type { FailoverReason } from "../../embedded-agent-helpers.js";
+import { resolveFailoverReasonFromError } from "../../failover-error.js";
 import { LiveSessionModelSwitchError } from "../../live-model-switch-error.js";
 import { shouldSwitchToLiveModel, clearLiveModelSwitchPending } from "../../live-model-switch.js";
 import { hasOnlyAssistantReasoningContent } from "../../replay-turn-classification.js";
@@ -149,6 +150,19 @@ export async function recoverEmbeddedRunAttempt(input: {
   const transportBatchSettled =
     settledEvidence.allToolsProvenSettled ||
     (settledEvidence.failedToolNames.size === 0 && settledEvidence.parkedCodeModeRun);
+  const settledRateLimitPromptFailure = Boolean(
+    !currentAttemptReplaySafe &&
+    promptError &&
+    promptErrorSource === "prompt" &&
+    !aborted &&
+    !timedOut &&
+    !terminalInterrupted &&
+    !hasNonToolTerminalState(attempt) &&
+    !settledEvidence.hasUnsettledToolError &&
+    !hasAsyncActivity(attempt.toolMetas) &&
+    transportBatchSettled &&
+    resolveFailoverReasonFromError(promptError, preparedRuntime.provider) === "rate_limit",
+  );
   const canContinueSettledMidTurnOverflow =
     promptErrorSource === "precheck" &&
     attempt.preflightRecovery?.source === "mid-turn" &&
@@ -234,7 +248,8 @@ export async function recoverEmbeddedRunAttempt(input: {
   if (
     !currentAttemptReplaySafe &&
     !canContinueSettledMidTurnOverflow &&
-    !settledTransportDropAssistant
+    !settledTransportDropAssistant &&
+    !settledRateLimitPromptFailure
   ) {
     return { action: "proceed" };
   }
@@ -377,10 +392,10 @@ export async function recoverEmbeddedRunAttempt(input: {
     );
     return retry();
   }
-  // Settled-tool continuation authorizes only current-transcript overflow and
-  // transport-drop recovery. Every path below can replay or replace the original
-  // attempt and remains fail-closed.
-  if (!currentAttemptReplaySafe) {
+  // Settled-tool continuation authorizes only current-transcript overflow,
+  // transport-drop recovery, and typed rate-limit failover. Every other path
+  // below can replay or replace the original attempt and remains fail-closed.
+  if (!currentAttemptReplaySafe && !settledRateLimitPromptFailure) {
     return { action: "proceed" };
   }
   const hasCodexAppServerTimeoutOutcome = Boolean(
@@ -448,9 +463,25 @@ export async function recoverEmbeddedRunAttempt(input: {
       getThinkLevel: () => preparedRuntime.snapshot().thinkLevel,
       traceAttempts: input.traceAttempts,
       previousRetryFailoverReason: input.lastRetryFailoverReason,
+    }).catch((error: unknown) => {
+      if (
+        settledRateLimitPromptFailure &&
+        resolveFailoverReasonFromError(error, preparedRuntime.provider) === "rate_limit"
+      ) {
+        // Outer model fallback must continue from the settled tool boundary;
+        // replaying the original turn would duplicate completed side effects.
+        params.onSettledTranscriptModelFallback?.();
+      }
+      throw error;
     });
     if (promptFailureOutcome.action === "complete") {
       return { action: "complete", result: promptFailureOutcome.result };
+    }
+    if (settledRateLimitPromptFailure) {
+      sessionPromptState.markOwnedTranscriptRetry();
+      sessionPromptState.continueFromCurrentTranscript({
+        includeToolFailureInstruction: settledEvidence.failedToolNames.size > 0,
+      });
     }
     preparedRuntime.setThinkLevel(promptFailureOutcome.thinkLevel);
     return retry({

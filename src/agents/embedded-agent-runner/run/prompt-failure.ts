@@ -74,11 +74,7 @@ export async function handleEmbeddedPromptFailure(input: {
     options?: { providerStarted?: boolean; transientRateLimit?: boolean },
   ) => AuthProfileFailureReason | null;
   advanceAuthProfile: () => Promise<boolean>;
-  advanceRateLimitAuthProfile: (context: {
-    failoverProvider: string;
-    failoverModel: string;
-    logFallbackDecision: ReturnType<typeof createFailoverDecisionLogger>;
-  }) => Promise<boolean>;
+  advanceRateLimitAuthProfile: () => Promise<boolean>;
   maybeMarkAuthProfileFailure: (failure: {
     profileId?: string;
     reason?: AuthProfileFailureReason | null;
@@ -245,11 +241,7 @@ export async function handleEmbeddedPromptFailure(input: {
   let rotated = false;
   if (failoverDecision.action === "rotate_profile") {
     if (promptFailoverReason === "rate_limit") {
-      rotated = await input.advanceRateLimitAuthProfile({
-        failoverProvider: input.provider,
-        failoverModel: input.modelId,
-        logFallbackDecision: logFailoverDecision,
-      });
+      rotated = await input.advanceRateLimitAuthProfile();
     } else {
       rotated = await input.advanceAuthProfile();
     }
