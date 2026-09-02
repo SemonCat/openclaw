@@ -2899,6 +2899,41 @@ describe("server-channels auto restart", () => {
     expect(manager.getPluginCommandCatalogAccounts()).toEqual(new Map());
   });
 
+  it("reports a running account that registered a dynamic plugin HTTP route", async () => {
+    const startAccount = vi.fn(
+      async ({ abortSignal }: { abortSignal: AbortSignal }) =>
+        await new Promise<void>((resolve) => {
+          const unregister = registerPluginHttpRoute({
+            path: "/mattermost/interactions/default",
+            auth: "plugin",
+            pluginId: "mattermost",
+            source: "mattermost-interactions",
+            handler: () => true,
+          });
+          abortSignal.addEventListener(
+            "abort",
+            () => {
+              unregister();
+              resolve();
+            },
+            { once: true },
+          );
+        }),
+    );
+    installTestRegistry(createTestPlugin({ id: "mattermost", startAccount }));
+    const manager = createManager({ channelIds: ["mattermost"] });
+
+    await manager.startChannels();
+    await waitForMicrotaskCondition(
+      () => startAccount.mock.calls.length === 1,
+      "expected the Mattermost account task to start",
+    );
+
+    expect(manager.getPluginCommandCatalogAccounts()).toEqual(
+      new Map([["mattermost", new Set([DEFAULT_ACCOUNT_ID])]]),
+    );
+  });
+
   it("cancels a pending startup when the account is stopped mid-boot", async () => {
     const startupGate = createDeferred();
     const isConfigured = vi.fn(async () => {

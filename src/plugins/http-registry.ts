@@ -4,6 +4,7 @@ import { normalizeOptionalString } from "@openclaw/normalization-core/string-coe
 import type { PluginRuntimeCapabilityLease } from "./capability-lease.js";
 import { normalizePluginHttpPath } from "./http-path.js";
 import { findPluginHttpRouteRegistrationConflicts } from "./http-route-overlap.js";
+import { retainPluginCommandCatalogForCurrentAccount } from "./plugin-command-account-start-scope.js";
 import type { PluginHttpRouteRegistration, PluginRegistry } from "./registry.js";
 import { requireActivePluginHttpRouteRegistry } from "./runtime.js";
 
@@ -201,6 +202,7 @@ export function registerPluginHttpRoute(params: {
   };
   pluginHttpRouteHolders.set(entry, new Set());
   routes.push(entry);
+  retainPluginCommandCatalogForCurrentAccount();
   return retainPluginHttpRoute({
     entry,
     routes,
