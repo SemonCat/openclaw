@@ -15,6 +15,11 @@ import {
 } from "../internal-runtime-context.js";
 import type { AgentCommandOpts } from "./types.js";
 
+export type AgentFallbackRuntimeState = {
+  originRuntime?: "cli" | "embedded";
+  continueFromSettledTranscript?: boolean;
+};
+
 /** Parameters for merging and persisting a session entry update. */
 type PersistSessionEntryParams = {
   sessionStore: Record<string, SessionEntry>;

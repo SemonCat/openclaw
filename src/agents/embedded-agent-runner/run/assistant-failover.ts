@@ -105,11 +105,7 @@ export async function handleAssistantFailover(params: {
     retryAfterMs?: number;
   }) => Promise<boolean>;
   advanceAuthProfile: () => Promise<boolean>;
-  advanceRateLimitAuthProfile: (context: {
-    failoverProvider: string;
-    failoverModel: string;
-    logFallbackDecision: (decision: "fallback_model", extra?: { status?: number }) => void;
-  }) => Promise<boolean>;
+  advanceRateLimitAuthProfile: () => Promise<boolean>;
 }): Promise<AssistantFailoverOutcome> {
   const terminal = projectAgentRunAttemptTerminal(params.terminal);
   // Routing reasons group several HTTP failures; retain the provider's status
@@ -217,11 +213,7 @@ export async function handleAssistantFailover(params: {
       // Minute-scale RPM windows can clear without spending a profile rotation
       // or model fallback. Keep the retry bounded; once exhausted, continue
       // through the existing rate-limit escalation path.
-      rotated = await params.advanceRateLimitAuthProfile({
-        failoverProvider: params.activeErrorContext.provider,
-        failoverModel: params.activeErrorContext.model,
-        logFallbackDecision: params.logAssistantFailoverDecision,
-      });
+      rotated = await params.advanceRateLimitAuthProfile();
     } else {
       rotated = await params.advanceAuthProfile();
     }
