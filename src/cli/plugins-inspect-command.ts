@@ -2,7 +2,7 @@
 import { getTerminalTableWidth, renderTable } from "../../packages/terminal-core/src/table.js";
 import { theme } from "../../packages/terminal-core/src/theme.js";
 import { listAgentIds } from "../agents/agent-scope-config.js";
-import { getRuntimeConfig } from "../config/config.js";
+import { getRuntimeConfig, getRuntimeConfigForInspection } from "../config/config.js";
 import type { PluginInstallRecord } from "../config/types.plugins.js";
 import { formatConsoleDiagnosticLine } from "../logging/json-console-line.js";
 import { resolvePluginControlPlaneWorkspace } from "../plugins/control-plane-workspace.js";
@@ -10,6 +10,7 @@ import { resolveInstalledPluginPackageOwnership } from "../plugins/installed-plu
 import type { PluginDiagnostic } from "../plugins/manifest-types.js";
 import { tracePluginLifecyclePhase } from "../plugins/plugin-lifecycle-trace.js";
 import { defaultRuntime } from "../runtime.js";
+import { withOpenClawStateArtifactPreservingReads } from "../state/openclaw-state-db-readonly.js";
 import { shortenHomeInString, shortenHomePath } from "../utils.js";
 import { formatMissingPluginMessage } from "./error-format.js";
 import { formatCliJsonFailure } from "./failure-output.js";
@@ -135,6 +136,18 @@ export async function runPluginsInspectCommand(
   id: string | undefined,
   opts: PluginInspectOptions,
 ): Promise<void> {
+  if (opts.runtime === true) {
+    return await runPluginsInspectCommandInner(id, opts);
+  }
+  return await withOpenClawStateArtifactPreservingReads(() =>
+    runPluginsInspectCommandInner(id, opts),
+  );
+}
+
+async function runPluginsInspectCommandInner(
+  id: string | undefined,
+  opts: PluginInspectOptions,
+): Promise<void> {
   const {
     buildAllPluginInspectReports,
     buildPluginDiagnosticsReport,
@@ -143,9 +156,15 @@ export async function runPluginsInspectCommand(
     formatPluginCompatibilityNotice,
   } = await import("../plugins/status.js");
   const { loadPluginMetadataSnapshot } = await import("../plugins/plugin-metadata-snapshot.js");
-  const cfg = tracePluginLifecyclePhase("config read", () => getRuntimeConfig(), {
-    command: "inspect",
-  });
+  const runtimeInspect = opts.runtime === true;
+  const cfg = tracePluginLifecyclePhase(
+    "config read",
+    () =>
+      runtimeInspect
+        ? getRuntimeConfig()
+        : getRuntimeConfigForInspection({ skipPluginValidation: true }),
+    { command: "inspect" },
+  );
   const { workspaceDir } = resolvePluginControlPlaneWorkspace({ config: cfg });
   const metadataSnapshot = tracePluginLifecyclePhase(
     "plugin metadata load",
@@ -159,7 +178,6 @@ export async function runPluginsInspectCommand(
     return ownership.ok ? ownership.value.installRecord : undefined;
   };
   const loggerParams = opts.json ? { logger: quietPluginJsonLogger } : {};
-  const runtimeInspect = opts.runtime === true;
   const reportParams = { config: cfg, metadataSnapshot, ...loggerParams };
   const runtimeReportParams = {
     ...reportParams,

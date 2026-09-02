@@ -450,17 +450,17 @@ describe("ensureConfigReady", () => {
     expect(getProcessPluginCache()).toBe(processCache);
   });
 
-  it("uses only the state migration checkpoint for gateway probes", async () => {
-    await runEnsureConfigReady(["gateway", "health"]);
+  it.each(["call", "status", "probe", "health", "discover"])(
+    "keeps gateway %s from migrating existing local state",
+    async (subcommand) => {
+      const root = useTempOpenClawHome();
+      writeLegacyTaskSidecarMarker(root);
 
-    expect(loadAndMaybeMigrateDoctorConfigMock).toHaveBeenCalledWith({
-      migrateState: true,
-      migrateLegacyConfig: false,
-      invalidConfigNote: false,
-      requireStateMigrationCheckpoint: true,
-    });
-    expect(getProcessPluginCache()).toBe(processCache);
-  });
+      await runEnsureConfigReady(["gateway", subcommand]);
+
+      expect(loadAndMaybeMigrateDoctorConfigMock).not.toHaveBeenCalled();
+    },
+  );
 
   it("runs doctor flow for legacy sessions without task sidecars", async () => {
     const root = useTempOpenClawHome();

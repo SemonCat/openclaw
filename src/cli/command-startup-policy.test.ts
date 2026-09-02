@@ -93,6 +93,13 @@ describe("command-startup-policy", () => {
     }
   });
 
+  it("keeps plugin inspection on non-observing config validation", () => {
+    expect(resolvePolicy({ commandPath: ["plugins", "inspect"] })).toMatchObject({
+      skipConfigGuard: false,
+      validateConfigOnly: true,
+    });
+  });
+
   it("skips operator-state startup for local Claw authoring commands only", () => {
     for (const subcommand of ["create", "validate", "build", "dev"]) {
       const commandPath = ["claws", subcommand];

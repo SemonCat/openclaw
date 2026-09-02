@@ -104,6 +104,28 @@ describe("gateway-backed CLI process exit", () => {
     },
   );
 
+  it.each([
+    { label: "plugins-list", args: ["plugins", "list", "--json"], expectedCode: 0 },
+    {
+      label: "plugins-inspect",
+      args: ["plugins", "inspect", "acpx", "--json"],
+      expectedCode: 1,
+    },
+  ])(
+    "leaves the shared database unchanged after $label",
+    async ({ label, args, expectedCode }) => {
+      const fixture = await prepareUnreachableGatewayCliFixture({ label, seeded: true });
+      const before = await snapshotSharedStateArtifacts(fixture.stateDir);
+      expect(before["openclaw.sqlite"]).toMatch(/^file:/u);
+
+      const result = await runIsolatedGatewayCli({ ...fixture, args });
+
+      expect(result).toMatchObject({ code: expectedCode, signal: null });
+      expect(await snapshotSharedStateArtifacts(fixture.stateDir)).toEqual(before);
+    },
+    30_000,
+  );
+
   it("dispatches node pairing mutations without opening the writable state database", async () => {
     const root = tempDirs.make("openclaw-node-pairing-cli-");
     const token = "test-token";

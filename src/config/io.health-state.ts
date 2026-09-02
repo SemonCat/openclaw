@@ -1,6 +1,6 @@
 import { formatErrorMessage } from "../infra/errors.js";
 import { executeSqliteQuerySync, getNodeSqliteKysely } from "../infra/kysely-sync.js";
-import { withExistingOpenClawStateDatabaseReadOnly } from "../state/openclaw-state-db-readonly.js";
+import { withExistingOpenClawStateDatabaseArtifactPreservingReadOnly } from "../state/openclaw-state-db-readonly.js";
 // Stores config health fingerprints in shared SQLite state.
 import type { DB as OpenClawStateKyselyDatabase } from "../state/openclaw-state-db.generated.js";
 import { runOpenClawStateWriteTransaction } from "../state/openclaw-state-db.js";
@@ -73,7 +73,7 @@ function stringifyConfigHealthFingerprint(
 export function readConfigHealthStateFromStore(deps: ConfigHealthStateDeps): ConfigHealthState {
   try {
     return (
-      withExistingOpenClawStateDatabaseReadOnly(
+      withExistingOpenClawStateDatabaseArtifactPreservingReadOnly(
         (database) => {
           const healthDb = getNodeSqliteKysely<ConfigHealthDatabase>(database.db);
           const rows = executeSqliteQuerySync(

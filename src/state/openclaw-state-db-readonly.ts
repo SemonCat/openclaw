@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { statSync } from "node:fs";
 import path from "node:path";
 import type { DatabaseSync } from "node:sqlite";
@@ -18,6 +19,8 @@ import {
   type OpenClawStateDatabaseOptions,
 } from "./openclaw-state-db-contract.js";
 import { resolveOpenClawStateSqlitePath } from "./openclaw-state-db.paths.js";
+
+const preserveStateArtifactsContext = new AsyncLocalStorage<boolean>();
 
 type OpenClawStateReadOnlyDatabase = {
   db: DatabaseSync;
@@ -127,6 +130,9 @@ export function withExistingOpenClawStateDatabaseReadOnly<T>(
   operation: (database: OpenClawStateReadOnlyDatabase) => T,
   options: OpenClawStateDatabaseOptions = {},
 ): T | undefined {
+  if (preserveStateArtifactsContext.getStore() === true) {
+    return withExistingOpenClawStateDatabaseArtifactPreservingReadOnly(operation, options);
+  }
   const pathname = resolveReadOnlyPath(options);
   const reused = withOpenClawStateDatabaseReadOnlyIfOpen(operation, options, pathname);
   if (reused.reused) {
@@ -140,6 +146,11 @@ export function withExistingOpenClawStateDatabaseReadOnly<T>(
         { ...options, path: existingPath },
         existingPath,
       );
+}
+
+/** Keep every shared-state read in an inspection operation off the source SQLite artifacts. */
+export function withOpenClawStateArtifactPreservingReads<T>(operation: () => T): T {
+  return preserveStateArtifactsContext.run(true, operation);
 }
 
 /** Read existing shared state without creating or updating its SQLite sidecars. */

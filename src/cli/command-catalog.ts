@@ -604,10 +604,11 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
     policy: { configGuard: "skip", ownsProtocolStdout: true, networkProxy: "bypass" },
   },
   {
-    commandPath: ["plugins", "update"],
+    commandPath: ["plugins", "inspect"],
     exact: true,
-    policy: { hideBanner: true },
+    policy: { configGuard: "validate", loadPlugins: "never", networkProxy: "bypass" },
   },
+  { commandPath: ["plugins", "update"], exact: true, policy: { hideBanner: true } },
   {
     commandPath: ["plugins", "list"],
     exact: true,

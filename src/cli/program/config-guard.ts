@@ -38,6 +38,13 @@ const ALLOWED_INVALID_GATEWAY_SUBCOMMANDS = new Set([
   "restart",
 ]);
 const ALLOWED_INVALID_TASK_SUBCOMMANDS = new Set(["list", "audit"]);
+const READ_ONLY_GATEWAY_CLIENT_SUBCOMMANDS = new Set([
+  "call",
+  "status",
+  "probe",
+  "health",
+  "discover",
+]);
 let didRunDoctorConfigFlow = false;
 let configSnapshotPromise: Promise<Awaited<ReturnType<typeof readConfigFileSnapshot>>> | null =
   null;
@@ -235,6 +242,11 @@ export async function ensureConfigReady(
   const subcommandName = commandPath[1];
   const isRestartController =
     (commandName === "gateway" || commandName === "daemon") && subcommandName === "restart";
+  const isReadOnlyGatewayClient =
+    commandName === "gateway" &&
+    subcommandName !== undefined &&
+    READ_ONLY_GATEWAY_CLIENT_SUBCOMMANDS.has(subcommandName);
+  const isReadOnlyStatusCommand = commandName === "status";
   let preflightResult: DoctorConfigPreflightResult | null = null;
   const shouldConsiderStateMigration =
     !params.validateConfigOnly &&
@@ -242,8 +254,11 @@ export async function ensureConfigReady(
     commandName !== "health" &&
     commandName !== "logs" &&
     commandName !== "sessions" &&
-    // Remote RPC clients must not migrate state owned by the running gateway.
-    !(commandName === "gateway" && subcommandName === "call") &&
+    // Status is an inspection command. A running Gateway owns shared-state
+    // migrations, and a CLI status process must never contend for that lease.
+    !isReadOnlyStatusCommand &&
+    // Gateway diagnostics and RPC clients must not migrate state owned by the running gateway.
+    !isReadOnlyGatewayClient &&
     // A newer restart client may be controlling an older live Gateway. Validate
     // config without advancing the persistent schema owned by that process.
     !isRestartController &&
@@ -297,9 +312,7 @@ export async function ensureConfigReady(
     ? ({ observe: false, pluginValidation: "core-only" } as const)
     : commandName === "logs"
       ? ({ observe: false, pluginValidation: "core-only" } as const)
-      : commandName === "status" ||
-          (commandName === "gateway" && subcommandName === "call") ||
-          isRestartController
+      : commandName === "status" || isReadOnlyGatewayClient || isRestartController
         ? ({ observe: false } as const)
         : undefined;
   let snapshot =
