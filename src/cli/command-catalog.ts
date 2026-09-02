@@ -601,11 +601,7 @@ export const cliCommandCatalog: readonly CliCommandCatalogEntry[] = [
   {
     commandPath: ["plugins", "inspect"],
     exact: true,
-    policy: {
-      configGuard: "validate",
-      loadPlugins: "never",
-      networkProxy: "bypass",
-    },
+    policy: { configGuard: "validate", loadPlugins: "never", networkProxy: "bypass" },
   },
   {
     commandPath: ["plugins", "update"],

@@ -17,13 +17,18 @@ describe("createStatusScanCoreBootstrap", () => {
   });
 
   it("finishes the gateway probe before starting synchronous agent inspection", async () => {
-    const probe = Promise.withResolvers<{ gatewayReachable: boolean }>();
-    mocks.resolveGatewayProbeSnapshot.mockReturnValue(probe.promise);
+    let resolveProbe!: (value: { gatewayReachable: boolean }) => void;
+    const probePromise = new Promise<{ gatewayReachable: boolean }>((resolve) => {
+      resolveProbe = resolve;
+    });
+    mocks.resolveGatewayProbeSnapshot.mockReturnValue(probePromise);
     const getAgentLocalStatuses = vi.fn(async () => ({ defaultId: "main" }));
 
     const bootstrap = await createStatusScanCoreBootstrap({
       coldStart: false,
       cfg: {},
+      configPath: "/tmp/openclaw.json",
+      env: {},
       hasConfiguredChannels: true,
       opts: {},
       skipUpdateCheck: true,
@@ -33,7 +38,7 @@ describe("createStatusScanCoreBootstrap", () => {
     });
 
     expect(getAgentLocalStatuses).not.toHaveBeenCalled();
-    probe.resolve({ gatewayReachable: true });
+    resolveProbe({ gatewayReachable: true });
     await bootstrap.gatewayProbePromise;
     await bootstrap.agentStatusPromise;
 

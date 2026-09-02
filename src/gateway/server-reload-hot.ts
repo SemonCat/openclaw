@@ -560,7 +560,7 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
         (accountId) => !stoppedAccountIds?.has(accountId),
       );
     });
-    const hasIndependentGatewayWork = getActiveCounts().rootRequests > 0;
+    const hasIndependentGatewayWork = plan.reloadPlugins && getActiveCounts().rootRequests > 0;
     // Plugin replacement can admit new agent work while an account monitor stays live.
     // Recheck that work here; durable ingress replay remains owned by the fresh monitor drain.
     // Even after every target stops, independent Gateway requests still own receipt ordering.

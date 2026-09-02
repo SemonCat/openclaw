@@ -491,6 +491,7 @@ export async function listAcpSessionEntries(params: {
           env: params.env,
         });
       } catch (error) {
+        // SAFETY: ACP agent selection errors are structured errors with an optional code field.
         if ((error as { code?: unknown }).code === "AGENT_SELECTION_REQUIRED") {
           continue;
         }
