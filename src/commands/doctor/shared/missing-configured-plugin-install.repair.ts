@@ -8,7 +8,7 @@ import {
   normalizePluginsConfig,
   resolveEffectiveEnableState,
 } from "../../../plugins/config-state.js";
-import { writePersistedInstalledPluginIndexInstallRecords } from "../../../plugins/installed-plugin-index-records.js";
+import { commitPluginInstallRecordsOnly } from "../../../plugins/install-record-commit.js";
 import { withPluginLifecycleLease } from "../../../plugins/plugin-lifecycle-lease.js";
 import { updateNpmInstalledPlugins } from "../../../plugins/update.js";
 import { resolveUserPath } from "../../../utils.js";
@@ -414,12 +414,16 @@ async function repairMissingPluginInstallsWithLease(
     }
   }
 
-  const persistedIndexOptions = { config: params.cfg, env };
   // An explicit baseline may include earlier unpersisted sync/npm changes;
   // commit it even when this repair made no further changes.
   if (nextRecords !== persistedRecords || params.baselineRecords) {
     await params.beforePersistentEffect?.();
-    await writePersistedInstalledPluginIndexInstallRecords(nextRecords, persistedIndexOptions);
+    await commitPluginInstallRecordsOnly({
+      previousInstallRecords: persistedRecords,
+      nextInstallRecords: nextRecords,
+      nextConfig: params.cfg,
+      env,
+    });
   }
   const pluginInventoryChanged = nextRecords !== persistedRecords || repairedPluginIds.size > 0;
   return {
