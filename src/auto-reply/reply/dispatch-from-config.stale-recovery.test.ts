@@ -141,6 +141,42 @@ describe("dispatchReplyFromConfig stale visible admission recovery", () => {
     expect(dispatchParams.dispatcher.sendFinalReply).toHaveBeenCalledTimes(1);
   });
 
+  it("reclaims stale Gateway work instead of adopting it into an orphan follow-up queue", async () => {
+    vi.useFakeTimers();
+    const startedAt = Date.now();
+    const activeOperation = createReplyOperation({
+      sessionKey,
+      sessionId: "active-gateway-session",
+      resetTriggered: false,
+    });
+    activeOperation.setPhase("running");
+    const replyResolver = vi.fn(async () => ({ text: "telegram reply" }) satisfies ReplyPayload);
+    const onAdopted = vi.fn(async () => {});
+    const dispatchParams = {
+      ...createVisibleDispatchParams(replyResolver),
+      replyOptions: {
+        turnAdoptionLifecycle: {
+          onAdopted,
+          onDeferred: vi.fn(),
+          onSettled: vi.fn(),
+        },
+      },
+    };
+    vi.setSystemTime(startedAt + RUN_STALE_TAKEOVER_MS + 1);
+
+    const resultPromise = dispatchReplyFromConfig(dispatchParams);
+    await vi.advanceTimersByTimeAsync(REPLY_RUN_TERMINAL_SETTLE_TIMEOUT_MS);
+    const result = await resultPromise;
+
+    expect(activeOperation.result).toEqual({ kind: "failed", code: "run_stalled" });
+    expect(result).toMatchObject({
+      queuedFinal: true,
+      counts: { tool: 0, block: 0, final: 0 },
+    });
+    expect(replyResolver).toHaveBeenCalledTimes(1);
+    expect(dispatchParams.dispatcher.sendFinalReply).toHaveBeenCalledTimes(1);
+  });
+
   it.each(["no_activity", "stuck_recovery"] as const)(
     "sends truthful stalled feedback when %s expires the active reply",
     async (reason) => {

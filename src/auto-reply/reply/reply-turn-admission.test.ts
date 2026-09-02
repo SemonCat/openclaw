@@ -472,6 +472,50 @@ describe("reply turn admission", () => {
     },
   );
 
+  it("does not let a newer channel turn steal an interrupted source recovery claim", async () => {
+    const sessionKey = "agent:main:mattermost:channel:recovery-race";
+    const sessionId = "interrupted-channel-session";
+    const storePath = createSessionStore({
+      [sessionKey]: {
+        sessionId,
+        updatedAt: 100,
+        status: "running",
+        abortedLastRun: true,
+        restartRecoveryDeliveryRunId: "interrupted-recovery-run",
+        restartRecoveryDeliverySourceRunId: "channel-user:v1:older-source",
+        mainRestartRecovery: {
+          cycleId: "cycle-1",
+          revision: 1,
+          chargedAttempts: 0,
+        },
+      },
+    });
+
+    await expect(
+      admitTestReplyTurn({
+        sessionKey,
+        sessionId,
+        expectedSessionId: sessionId,
+        sourceTurnId: "channel-user:v1:newer-source",
+        storePath,
+      }),
+    ).rejects.toThrow("restart recovery claim changed before reply admission");
+
+    expect(replyRunRegistry.get(sessionKey)).toBeUndefined();
+    await expect(readSessionEntry(storePath, sessionKey)).resolves.toMatchObject({
+      abortedLastRun: true,
+      restartRecoveryDeliveryRunId: "interrupted-recovery-run",
+      restartRecoveryDeliverySourceRunId: "channel-user:v1:older-source",
+      mainRestartRecovery: {
+        cycleId: "cycle-1",
+        revision: 1,
+      },
+    });
+    await expect(readSessionEntry(storePath, sessionKey)).resolves.not.toHaveProperty(
+      "mainRestartRecovery.foregroundClaims",
+    );
+  });
+
   it.each(["visible", "queued_followup"] as const)(
     "waits for restart-recovery owner release before %s successor admission",
     async (kind) => {

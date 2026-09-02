@@ -40,6 +40,7 @@ import { waitForReplyDispatcherIdle } from "./reply-dispatcher.js";
 import type { ReplyDispatcher } from "./reply-dispatcher.types.js";
 import {
   forceClearReplyRunBySessionId,
+  isReplyRunEvidenceStale,
   replyRunRegistry,
   type ReplyOperation,
   waitForReplyBarrierSettlement,
@@ -51,6 +52,7 @@ import {
 } from "./reply-turn-admission.js";
 import { canReplaceRestartTombstoneFromParent } from "./session-parent-fork-prepare.js";
 import { resolveAuthorizedSessionResetCommand } from "./session-reset-command.js";
+import { readChannelSourceTurnId } from "./source-turn-id.js";
 
 type DispatchReplyOperationAcquisition =
   | { status: "ready" }
@@ -435,6 +437,7 @@ export function createDispatchReplyOperationCoordinator(params: {
       (params.replyOptions?.turnAdoptionLifecycle !== undefined ||
         params.allowActiveQueueResolution === true) &&
       activeReplyOperation !== undefined &&
+      !isReplyRunEvidenceStale(activeReplyOperation) &&
       activeReplyOperation.turnKind !== "heartbeat";
     if (allowGatewayQueueResolution) {
       // Gateway and low-level plugin turns must reach getReplyFromConfig while the owner is active;
@@ -469,6 +472,7 @@ export function createDispatchReplyOperationCoordinator(params: {
           routeThreadId: params.routeThreadId,
           originatingLeafEntryId:
             params.replyOptions?.turnAdoptionLifecycle?.originatingLeafEntryId,
+          sourceTurnId: readChannelSourceTurnId(params.ctx),
           upstreamAbortSignal: params.replyOptions?.abortSignal,
           waitForActive: !allowActiveResolution && !allowSlackRoutedThreadBypass,
           retainLifecycleAdmissionOnActive: allowActiveResolution || allowSlackRoutedThreadBypass,
