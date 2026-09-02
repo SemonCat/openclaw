@@ -551,12 +551,24 @@ export function createGatewayReloadHandlers(params: GatewayReloadHandlerParams) 
     }
 
     const channelTargets = channelReloadTargets();
-    const hasLiveChannelTargets = [...channelTargets].some(
-      (channel) => !channelsStoppedBeforePluginReload.has(channel),
-    );
+    const hasLiveChannelTargets = [...channelTargets].some((channel) => {
+      if (channelsToRestart.has(channel)) {
+        return !channelsStoppedBeforePluginReload.has(channel);
+      }
+      const stoppedAccountIds = accountsStoppedBeforePluginReload.get(channel);
+      return [...(restartChannelAccounts.get(channel) ?? [])].some(
+        (accountId) => !stoppedAccountIds?.has(accountId),
+      );
+    });
+    const hasIndependentGatewayWork = plan.reloadPlugins && getActiveCounts().rootRequests > 0;
     // Plugin replacement can admit new agent work while an account monitor stays live.
     // Recheck that work here; durable ingress replay remains owned by the fresh monitor drain.
-    if (!pluginReloadAborted && hasLiveChannelTargets && !shouldSkipChannelRestart) {
+    // Even after every target stops, independent Gateway requests still own receipt ordering.
+    if (
+      !pluginReloadAborted &&
+      (hasLiveChannelTargets || hasIndependentGatewayWork) &&
+      !shouldSkipChannelRestart
+    ) {
       const waitCancelled = await waitForActiveWorkBeforeChannelReload(channelTargets, isCurrent);
       // A committed owner must finish its model/channel tail before the next config runs.
       // Supersession ends this wait: a newer writer may itself be awaiting that next reload.
