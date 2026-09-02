@@ -9,7 +9,7 @@ import { loadExecApprovalsReadOnly } from "../../infra/exec-approvals.js";
 import { inspectPortUsage } from "../../infra/ports-inspect.js";
 import { readRestartSentinelReadOnly } from "../../infra/restart-sentinel.js";
 import { resolvePluginControlPlaneWorkspace } from "../../plugins/control-plane-workspace.js";
-import { buildPluginCompatibilityNotices } from "../../plugins/status.js";
+import { buildPluginCompatibilitySnapshotNotices } from "../../plugins/status.js";
 import { buildWorkspaceSkillStatus } from "../../skills/discovery/status.js";
 import { getRemoteSkillEligibility } from "../../skills/runtime/remote.js";
 import { buildStatusAllOverviewRows } from "../status-overview-rows.ts";
@@ -76,7 +76,7 @@ async function resolveStatusAllLocalDiagnosis(params: {
     };
     tailscaleHttpsUrl: string | null;
     skillStatus: ReturnType<typeof buildWorkspaceSkillStatus> | null;
-    pluginCompatibility: ReturnType<typeof buildPluginCompatibilityNotices>;
+    pluginCompatibility: ReturnType<typeof buildPluginCompatibilitySnapshotNotices>;
     channelsStatus: StatusScanOverviewResult["channelsStatus"];
     channelIssues: StatusScanOverviewResult["channelIssues"];
     agentStatus: StatusScanOverviewResult["agentStatus"];
@@ -157,7 +157,7 @@ async function resolveStatusAllLocalDiagnosis(params: {
           }
         })()
       : null;
-  const pluginCompatibility = buildPluginCompatibilityNotices({ config: overview.cfg });
+  const pluginCompatibility = buildPluginCompatibilitySnapshotNotices({ config: overview.cfg });
 
   return {
     configPath,
