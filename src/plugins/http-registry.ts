@@ -4,6 +4,7 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { normalizePluginHttpPath } from "./http-path.js";
 import { findPluginHttpRouteRegistrationConflicts } from "./http-route-overlap.js";
+import { retainPluginCommandCatalogForCurrentAccount } from "./plugin-command-account-start-scope.js";
 import type { PluginHttpRouteRegistration, PluginRegistry } from "./registry.js";
 import { requireActivePluginHttpRouteRegistry } from "./runtime.js";
 
@@ -162,6 +163,7 @@ export function registerPluginHttpRoute(params: {
     source: params.source,
   };
   routes.push(entry);
+  retainPluginCommandCatalogForCurrentAccount();
 
   const releases: Array<() => void> = [];
   const unregister = () => {

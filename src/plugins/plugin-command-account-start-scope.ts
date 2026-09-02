@@ -25,10 +25,10 @@ export function withPluginCommandAccountStartScope<T>(
   return pluginCommandAccountStartScope.run(scope, run);
 }
 
-/** Marks the current account only when its startup channel matches the catalog provider. */
-export function retainPluginCommandCatalogForCurrentAccount(channelId: string): void {
+/** Marks the current account when it retains state in the active plugin registry generation. */
+export function retainPluginCommandCatalogForCurrentAccount(channelId?: string): void {
   const scope = pluginCommandAccountStartScope.getStore();
-  if (scope?.channelId === channelId) {
+  if (scope && (!channelId || scope.channelId === channelId)) {
     scope.retainCatalog();
   }
 }

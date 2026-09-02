@@ -2,8 +2,13 @@
  * Plugin HTTP runtime-scope integration tests.
  */
 import type { IncomingMessage, ServerResponse } from "node:http";
+import type { Duplex } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { SubsystemLogger } from "../../logging/subsystem.js";
+import {
+  createPluginCommandRuntime,
+  matchPluginCommandInvocation,
+} from "../../plugins/plugin-command-runtime.js";
 import { createEmptyPluginRegistry } from "../../plugins/registry.js";
 import { setActivePluginRegistry } from "../../plugins/runtime.js";
 import { getPluginRuntimeGatewayRequestScope } from "../../plugins/runtime/gateway-request-scope.js";
@@ -14,7 +19,10 @@ import { isApprovalRecordVisibleToClient } from "../server-methods/approval-shar
 import type { GatewayRequestContext } from "../server-methods/types.js";
 import { makeMockHttpResponse } from "../test-http-response.js";
 import { createGatewayTestRegistry } from "./__tests__/test-utils.js";
-import { createGatewayPluginRequestHandler } from "./plugins-http.js";
+import {
+  createGatewayPluginRequestHandler,
+  createGatewayPluginUpgradeHandler,
+} from "./plugins-http.js";
 
 const SECURE_HOOK_PATH = "/secure-hook";
 const SECURE_ADMIN_HOOK_PATH = "/secure-admin-hook";
@@ -30,6 +38,11 @@ function createRoute(params: {
   gatewayRuntimeScopeSurface?: "write-default" | "trusted-operator";
   gatewayMethodDispatchAllowed?: boolean;
   handler?: (req: IncomingMessage, res: ServerResponse) => boolean | Promise<boolean>;
+  handleUpgrade?: (
+    req: IncomingMessage,
+    socket: Duplex,
+    head: Buffer,
+  ) => boolean | Promise<boolean>;
 }) {
   return {
     pluginId: "route",
@@ -39,8 +52,16 @@ function createRoute(params: {
     gatewayMethodDispatchAllowed: params.gatewayMethodDispatchAllowed,
     match: params.match ?? "exact",
     handler: params.handler ?? (() => true),
+    handleUpgrade: params.handleUpgrade,
     source: "route",
   };
+}
+
+function createMockUpgradeSocket() {
+  return {
+    write: vi.fn(),
+    destroy: vi.fn(),
+  } as unknown as Duplex;
 }
 
 function createMockLogger(): SubsystemLogger {
@@ -264,7 +285,6 @@ describe("plugin HTTP route runtime scopes", () => {
         }),
       ],
     });
-
     const { handled } = await dispatchPluginRequest(handler, {
       path: SECURE_HOOK_PATH,
       authContext: {
@@ -318,6 +338,91 @@ describe("plugin HTTP route runtime scopes", () => {
       expect(observedActor).toEqual(systemActor ? { kind: "system" } : undefined);
     },
   );
+
+  it("runs swapped HTTP routes with the registry used to match the request", async () => {
+    const startupRegistry = createGatewayTestRegistry();
+    let routeRegistry = startupRegistry;
+    let observedRegistry: ReturnType<typeof createGatewayTestRegistry> | undefined;
+    let matchedCommand = false;
+    const replacementRegistry = createGatewayTestRegistry({
+      commands: [
+        {
+          pluginId: "route",
+          command: {
+            name: "channel_model",
+            description: "Select a channel model",
+            acceptsArgs: true,
+            handler: async () => ({ text: "ok" }),
+          },
+          source: "route",
+        },
+      ],
+      httpRoutes: [
+        createRoute({
+          path: "/mattermost/command",
+          auth: "plugin",
+          handler: async () => {
+            observedRegistry = getPluginRuntimeGatewayRequestScope()?.pluginRegistry;
+            const commandRuntime = createPluginCommandRuntime();
+            matchedCommand =
+              matchPluginCommandInvocation(commandRuntime, "/channel_model flash", {
+                channel: "mattermost",
+              }) !== null;
+            return true;
+          },
+        }),
+      ],
+    });
+    const handler = createGatewayPluginRequestHandler({
+      registry: startupRegistry,
+      getRouteRegistry: () => routeRegistry,
+      log: createMockLogger(),
+    });
+    routeRegistry = replacementRegistry;
+
+    const response = await dispatchPluginRequest(handler, {
+      path: "/mattermost/command",
+      authContext: { gatewayAuthSatisfied: false },
+    });
+
+    expect(response.handled).toBe(true);
+    expect(response.res.statusCode).toBe(200);
+    expect(observedRegistry).toBe(replacementRegistry);
+    expect(matchedCommand).toBe(true);
+  });
+
+  it("runs swapped WebSocket routes with the registry used to match the upgrade", async () => {
+    const startupRegistry = createGatewayTestRegistry();
+    let routeRegistry = startupRegistry;
+    let observedRegistry: ReturnType<typeof createGatewayTestRegistry> | undefined;
+    const replacementRegistry = createGatewayTestRegistry({
+      httpRoutes: [
+        createRoute({
+          path: "/mattermost/ws",
+          auth: "plugin",
+          handleUpgrade: async () => {
+            observedRegistry = getPluginRuntimeGatewayRequestScope()?.pluginRegistry;
+            return true;
+          },
+        }),
+      ],
+    });
+    const handler = createGatewayPluginUpgradeHandler({
+      registry: startupRegistry,
+      getRouteRegistry: () => routeRegistry,
+      log: createMockLogger(),
+    });
+    routeRegistry = replacementRegistry;
+
+    const handled = await handler(
+      { url: "/mattermost/ws" } as IncomingMessage,
+      createMockUpgradeSocket(),
+      Buffer.alloc(0),
+    );
+
+    expect(handled).toBe(true);
+    expect(observedRegistry).toBe(replacementRegistry);
+  });
 
   it("uses server-local routes and gateway context when the active registry belongs to another gateway", async () => {
     const serverAContext = { label: "server-a" } as unknown as GatewayRequestContext;
