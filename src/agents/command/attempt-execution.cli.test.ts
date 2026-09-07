@@ -4056,7 +4056,7 @@ describe("CLI attempt execution", () => {
     },
   );
 
-  it("uses a continuation-only embedded prompt after settled transcript fallback", async () => {
+  it("preserves the objective in the embedded prompt after settled transcript fallback", async () => {
     const originalBody = "perform the original side-effecting task";
     const fallbackRuntimeState: NonNullable<RunAgentAttemptParams["fallbackRuntimeState"]> = {
       originRuntime: "embedded",
@@ -4071,7 +4071,8 @@ describe("CLI attempt execution", () => {
     });
 
     expect(embeddedArg.prompt).toContain("Continue from the current transcript");
-    expect(embeddedArg.prompt).not.toContain(originalBody);
+    expect(embeddedArg.prompt).toContain("Original user request");
+    expect(embeddedArg.prompt).toContain(originalBody);
     expect(embeddedArg.skipPreparedUserTurnMessage).toBe(true);
   });
 

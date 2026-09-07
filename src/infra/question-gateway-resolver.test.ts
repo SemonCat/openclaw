@@ -1,6 +1,9 @@
 // Covers question-button value resolution through a stubbed Gateway.
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { resolveQuestionOverGateway } from "./question-gateway-resolver.js";
+import {
+  resolveQuestionOverGateway,
+  resolveSecretQuestionOverGateway,
+} from "./question-gateway-resolver.js";
 
 const hoisted = vi.hoisted(() => ({ callGateway: vi.fn() }));
 
@@ -20,6 +23,19 @@ const pendingRecord = {
   ],
   createdAtMs: 1,
   expiresAtMs: 2,
+} as const;
+const pendingSecretRecord = {
+  ...pendingRecord,
+  questions: [
+    {
+      questionId: "credential",
+      header: "API key",
+      question: "Provide the credential.",
+      options: [],
+      isSecret: true,
+      secretStore: { name: "SERVICE_API_KEY", kind: "secret" },
+    },
+  ],
 } as const;
 
 function terminalError(reason: "QUESTION_ALREADY_TERMINAL" | "QUESTION_NOT_FOUND") {
@@ -159,4 +175,92 @@ describe("resolveQuestionOverGateway", () => {
     ).resolves.toEqual({ status: "custom-input", questionId: "deploy_target" });
     expect(hoisted.callGateway).toHaveBeenCalledOnce();
   });
+});
+
+describe("resolveSecretQuestionOverGateway", () => {
+  beforeEach(() => {
+    hoisted.callGateway.mockReset();
+  });
+
+  it("maps a secret value to the canonical store-bound question without returning it", async () => {
+    const secret = "test-secret-value-that-must-not-be-returned";
+    hoisted.callGateway
+      .mockResolvedValueOnce({ question: pendingSecretRecord })
+      .mockResolvedValueOnce({
+        status: "answered",
+        answers: { answers: { credential: ["stored"] } },
+      });
+
+    const result = await resolveSecretQuestionOverGateway({
+      cfg: {} as never,
+      questionId: recordId,
+      secretValue: secret,
+      senderId: "mattermost:user-1",
+    });
+
+    expect(result).toEqual({ status: "answered", questionId: "credential" });
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(hoisted.callGateway.mock.calls).toEqual([
+      [
+        expect.objectContaining({
+          method: "question.get",
+          params: { id: recordId },
+          scopes: ["operator.questions"],
+        }),
+      ],
+      [
+        expect.objectContaining({
+          method: "question.resolve",
+          params: {
+            id: recordId,
+            answers: { answers: { credential: [secret] } },
+            resolvedBy: "mattermost:user-1",
+          },
+        }),
+      ],
+    ]);
+  });
+
+  it.each([
+    ["non-secret", pendingRecord],
+    [
+      "multi-question",
+      {
+        ...pendingSecretRecord,
+        questions: [...pendingSecretRecord.questions, pendingRecord.questions[0]],
+      },
+    ],
+  ] as const)("rejects a %s record before forwarding a value", async (_name, question) => {
+    hoisted.callGateway.mockResolvedValueOnce({ question });
+
+    await expect(
+      resolveSecretQuestionOverGateway({
+        cfg: {} as never,
+        questionId: recordId,
+        secretValue: "never-forward",
+      }),
+    ).rejects.toThrow("one store-bound secret question");
+    expect(hoisted.callGateway).toHaveBeenCalledOnce();
+  });
+
+  it.each([
+    ["question.get", "QUESTION_NOT_FOUND", "not-found"],
+    ["question.resolve", "QUESTION_ALREADY_TERMINAL", "already-terminal"],
+  ] as const)(
+    "returns a terminal outcome when secret %s races",
+    async (method, reason, expectedReason) => {
+      if (method === "question.resolve") {
+        hoisted.callGateway.mockResolvedValueOnce({ question: pendingSecretRecord });
+      }
+      hoisted.callGateway.mockRejectedValueOnce(terminalError(reason));
+
+      await expect(
+        resolveSecretQuestionOverGateway({
+          cfg: {} as never,
+          questionId: recordId,
+          secretValue: "not-returned",
+        }),
+      ).resolves.toEqual({ status: "already-terminal", reason: expectedReason });
+    },
+  );
 });

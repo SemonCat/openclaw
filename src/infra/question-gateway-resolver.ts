@@ -13,6 +13,19 @@ export type ResolveQuestionOverGatewayResult =
   | { status: "custom-input"; questionId: string }
   | { status: "already-terminal"; reason: "already-terminal" | "not-found" };
 
+export type ResolveSecretQuestionOverGatewayResult =
+  | { status: "answered"; questionId: string }
+  | { status: "already-terminal"; reason: "already-terminal" | "not-found" };
+
+export type ResolveSecretQuestionOverGatewayParams = {
+  cfg: OpenClawConfig;
+  questionId: string;
+  secretValue: string;
+  senderId?: string | null;
+  gatewayUrl?: string;
+  clientDisplayName?: string;
+};
+
 export type ResolveQuestionOverGatewayParams = {
   cfg: OpenClawConfig;
   questionId: string;
@@ -130,4 +143,64 @@ export async function resolveQuestionOverGateway(
     throw error;
   }
   return { status: "answered", questionId: question.questionId, optionValue };
+}
+
+/** Stores one answer for a canonical store-bound secret question. */
+export async function resolveSecretQuestionOverGateway(
+  params: ResolveSecretQuestionOverGatewayParams,
+): Promise<ResolveSecretQuestionOverGatewayResult> {
+  if (!QUESTION_RECORD_ID_PATTERN.test(params.questionId)) {
+    throw new Error("secret question resolution requires a valid question record id");
+  }
+  if (!params.secretValue) {
+    throw new Error("secret question resolution requires a non-empty value");
+  }
+  const gatewayOptions = {
+    config: params.cfg,
+    url: params.gatewayUrl,
+    scopes: ["operator.questions" as const],
+    clientDisplayName:
+      params.clientDisplayName ?? `Secret question (${params.senderId?.trim() || "unknown"})`,
+  };
+  let getResult: QuestionGetResult;
+  try {
+    getResult = await callGateway<QuestionGetResult>({
+      ...gatewayOptions,
+      method: "question.get",
+      params: { id: params.questionId },
+    });
+  } catch (error) {
+    const reason = readTerminalReason(error);
+    if (reason) {
+      return { status: "already-terminal", reason };
+    }
+    throw error;
+  }
+
+  const record = getResult.question;
+  if (record.status !== "pending") {
+    return { status: "already-terminal", reason: "already-terminal" };
+  }
+  const question = record.questions.length === 1 ? record.questions[0] : undefined;
+  if (!question?.isSecret || question.secretStore?.kind !== "secret") {
+    throw new Error("secret resolution requires one store-bound secret question");
+  }
+  try {
+    await callGateway<QuestionResolveResult>({
+      ...gatewayOptions,
+      method: "question.resolve",
+      params: {
+        id: params.questionId,
+        answers: { answers: { [question.questionId]: [params.secretValue] } },
+        resolvedBy: params.senderId?.trim() || undefined,
+      },
+    });
+  } catch (error) {
+    const reason = readTerminalReason(error);
+    if (reason) {
+      return { status: "already-terminal", reason };
+    }
+    throw error;
+  }
+  return { status: "answered", questionId: question.questionId };
 }

@@ -33,6 +33,7 @@ import {
   type AgentRunTerminalReplySnapshot,
 } from "../agent-run-terminal-reply.js";
 import { cliBackendLog } from "../cli-runner/log.js";
+import { buildTranscriptContinuationPrompt } from "../transcript-continuation-prompt.js";
 import { resolveClaudeCliProjectDirForWorkspace } from "./claude-cli-project-dir.js";
 
 const CLAUDE_CLI_TRANSCRIPT_MAX_RECORDS = 500;
@@ -304,9 +305,7 @@ export function resolveFallbackRetryPrompt(params: {
   }
   const prelude = params.priorContextPrelude?.trim();
   if (params.continueFromSettledTranscript) {
-    const continuation =
-      "Continue from the current transcript after the latest tool result. " +
-      "Do not repeat the original user request, and do not rerun completed tools unless the transcript shows they are still needed.";
+    const continuation = buildTranscriptContinuationPrompt(params.body);
     return prelude ? `${prelude}\n\n${continuation}` : continuation;
   }
   if (!params.sessionHasHistory && !prelude) {

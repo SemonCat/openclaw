@@ -8,6 +8,7 @@ import { registerAgentRunContext } from "../../../infra/agent-run-registry.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
 import type { AgentRunSessionTarget } from "../../run-session-target.js";
 import { TOOL_FAILURE_INSTRUCTION } from "../../tool-outcome-instructions.js";
+import { buildTranscriptContinuationPrompt } from "../../transcript-continuation-prompt.js";
 import type { AcceptedCompactionSuccessor } from "../compaction-successor.js";
 import { log } from "../logger.js";
 import type { PreparedEmbeddedRunInput } from "./execution-context.js";
@@ -15,9 +16,6 @@ import {
   buildContextEngineCompactionSessionTarget,
   prepareInitialSessionWriter,
 } from "./session-bootstrap.js";
-
-const MID_TURN_PRECHECK_CONTINUATION_PROMPT =
-  "Continue from the current transcript after the latest tool result. Do not repeat the original user request, and do not rerun completed tools unless the transcript shows they are still needed.";
 
 type ActivePrompt = {
   override?: string;
@@ -32,6 +30,7 @@ export function createEmbeddedRunSessionPromptState(input: {
   lifecycleGeneration: PreparedEmbeddedRunInput["lifecycleGeneration"];
 }) {
   const { runParams: params, sessionAgentId, resolvedSessionKey, lifecycleGeneration } = input;
+  const midTurnContinuationPrompt = buildTranscriptContinuationPrompt(params.prompt);
   let activeSessionId = params.sessionId;
   let activeSessionFile = params.sessionFile;
   let activeSessionTarget: ContextEngineSessionTarget | undefined =
@@ -231,8 +230,8 @@ export function createEmbeddedRunSessionPromptState(input: {
     },
     continueFromCurrentTranscript: (options?: { includeToolFailureInstruction?: boolean }) => {
       const prompt = options?.includeToolFailureInstruction
-        ? `${MID_TURN_PRECHECK_CONTINUATION_PROMPT} ${TOOL_FAILURE_INSTRUCTION}`
-        : MID_TURN_PRECHECK_CONTINUATION_PROMPT;
+        ? `${midTurnContinuationPrompt} ${TOOL_FAILURE_INSTRUCTION}`
+        : midTurnContinuationPrompt;
       activateInternalPrompt(prompt);
     },
     onUserMessagePersisted,
@@ -244,7 +243,7 @@ export function createEmbeddedRunSessionPromptState(input: {
       if (activePrompt.internal) {
         suppressNextUserMessagePersistence = activePrompt.persisted;
       } else if (activePrompt.persisted) {
-        activateInternalPrompt(MID_TURN_PRECHECK_CONTINUATION_PROMPT);
+        activateInternalPrompt(midTurnContinuationPrompt);
       }
     },
   };
