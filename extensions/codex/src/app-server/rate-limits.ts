@@ -72,11 +72,10 @@ export function formatCodexUsageLimitErrorMessage(params: {
   }
   const nowMs = params.nowMs ?? Date.now();
   const usageSummary = summarizeCodexAccountUsage(params.rateLimits, nowMs);
-  if (
-    params.rateLimitsAuthoritative &&
-    hasCodexRateLimitSnapshots(params.rateLimits) &&
-    !usageSummary?.blocked
-  ) {
+  const hasAuthoritativeRateLimitSnapshots = Boolean(
+    params.rateLimitsAuthoritative && hasCodexRateLimitSnapshots(params.rateLimits),
+  );
+  if (hasAuthoritativeRateLimitSnapshots && !usageSummary?.blocked) {
     return [
       CODEX_USAGE_LIMIT_STATE_MISMATCH_MESSAGE,
       "Retry the request, use another Codex account if available, or switch to another configured model/provider.",
@@ -92,10 +91,10 @@ export function formatCodexUsageLimitErrorMessage(params: {
     parts.push(`Next reset ${formatResetTime(nextReset.resetsAtMs, nowMs)}.`);
     recoveryAction = "Wait until the reset time";
   } else {
-    const codexRetryHint = extractCodexRetryHint(message);
-    if (codexRetryHint) {
-      parts.push(`Codex says to try again ${codexRetryHint}.`);
-      recoveryAction = "Wait until the retry time";
+    const codexResetHint = extractCodexResetHint(message, !hasAuthoritativeRateLimitSnapshots);
+    if (codexResetHint) {
+      parts.push(`${codexResetHint[0]}.`);
+      recoveryAction = codexResetHint[1];
     } else {
       if (usageSummary?.blockingPeriod && usageSummary.blockingReason) {
         parts.push(`Your ${usageSummary.blockingReason}.`);
@@ -760,18 +759,31 @@ function formatWindowSignature(value: JsonValue | undefined): string {
   }`;
 }
 
-function extractCodexRetryHint(message: string | undefined): string | undefined {
+function extractCodexResetHint(
+  message: string | undefined,
+  allowEnrichedHint: boolean,
+): [text: string, recoveryAction: string] | undefined {
   if (!message) {
     return undefined;
   }
-  const tryAgainAt = /\btry again\s+(at\s+[^.!?\n]+)(?:[.!?]|$)/iu.exec(message);
-  if (tryAgainAt?.[1]) {
-    return tryAgainAt[1].trim();
+  if (allowEnrichedHint && message.startsWith(CODEX_USAGE_LIMIT_MESSAGE_PREFIX)) {
+    // Re-entrant formatting preserves only the grammar emitted by formatResetTime.
+    const nextReset =
+      /^ Next reset (in\s+\d+\s+(?:seconds?|minutes?|hours?|days?),\s+[A-Z][a-z]{2}\s+\d{1,2}(?:,\s+\d{4})?\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+\S{1,16})\.(?:\s|$)/u.exec(
+        message.slice(CODEX_USAGE_LIMIT_MESSAGE_PREFIX.length),
+      );
+    if (nextReset?.[1]) {
+      return [`Next reset ${nextReset[1].trim()}`, "Wait until the reset time"];
+    }
   }
+  const tryAgainAt = /\btry again\s+(at\s+[^.!?\n]+)(?:[.!?]|$)/iu.exec(message);
   const tryAgainRelative = /\btry again\s+((?:tomorrow|in\s+[^.!?\n]+)[^.!?\n]*)(?:[.!?]|$)/iu.exec(
     message,
   );
-  return tryAgainRelative?.[1]?.trim();
+  const retryHint = tryAgainAt?.[1]?.trim() || tryAgainRelative?.[1]?.trim();
+  return retryHint
+    ? [`Codex says to try again ${retryHint}`, "Wait until the retry time"]
+    : undefined;
 }
 
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */
