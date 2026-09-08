@@ -150,6 +150,18 @@ export async function recoverEmbeddedRunAttempt(input: {
   const transportBatchSettled =
     settledEvidence.allToolsProvenSettled ||
     (settledEvidence.failedToolNames.size === 0 && settledEvidence.parkedCodeModeRun);
+  // Codex may append synthetic failures for earlier accepted batches after the
+  // latest real result. Only typed rate-limit continuation consumes that proof;
+  // generic recovery retains the strict current-batch lifecycle gate above.
+  const rateLimitBatchSettled =
+    transportBatchSettled || settledEvidence.settledWithLateSyntheticPriorResults;
+  const rateLimitToolErrorSettled =
+    !settledEvidence.hasUnsettledToolError ||
+    (settledEvidence.settledWithLateSyntheticPriorResults &&
+      Boolean(
+        attempt.lastToolError &&
+        settledEvidence.lateSyntheticPriorFailureNames.has(attempt.lastToolError.toolName),
+      ));
   const settledRateLimitPromptFailure = Boolean(
     !currentAttemptReplaySafe &&
     promptError &&
@@ -158,9 +170,9 @@ export async function recoverEmbeddedRunAttempt(input: {
     !timedOut &&
     !terminalInterrupted &&
     !hasNonToolTerminalState(attempt) &&
-    !settledEvidence.hasUnsettledToolError &&
+    rateLimitToolErrorSettled &&
     !hasAsyncActivity(attempt.toolMetas) &&
-    transportBatchSettled &&
+    rateLimitBatchSettled &&
     resolveFailoverReasonFromError(promptError, preparedRuntime.provider) === "rate_limit",
   );
   const canContinueSettledMidTurnOverflow =
@@ -480,7 +492,9 @@ export async function recoverEmbeddedRunAttempt(input: {
     if (settledRateLimitPromptFailure) {
       sessionPromptState.markOwnedTranscriptRetry();
       sessionPromptState.continueFromCurrentTranscript({
-        includeToolFailureInstruction: settledEvidence.failedToolNames.size > 0,
+        includeToolFailureInstruction:
+          settledEvidence.failedToolNames.size > 0 ||
+          settledEvidence.lateSyntheticPriorFailureNames.size > 0,
       });
     }
     preparedRuntime.setThinkLevel(promptFailureOutcome.thinkLevel);
