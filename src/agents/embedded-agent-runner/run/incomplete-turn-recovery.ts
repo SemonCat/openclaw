@@ -266,6 +266,26 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
       return owners.length === 1 ? ([[id, result]] as const) : [];
     }),
   );
+  const terminalizedToolCalls = new Map(
+    (attempt.terminalizedToolCalls ?? []).map((call) => [call.toolCallId, call.toolName]),
+  );
+  const terminalizedCurrentResults = new Map(
+    requestedToolCalls.flatMap(({ id, name }) => {
+      const result = id === null ? undefined : settledToolResults.get(id);
+      if (
+        id === null ||
+        name === null ||
+        terminalizedToolCalls.get(id) !== name ||
+        result?.toolName !== name ||
+        !result.isError ||
+        !isRecord(result.details) ||
+        result.details.reason !== "missing_tool_result"
+      ) {
+        return [];
+      }
+      return [[id, result] as const];
+    }),
+  );
   // Transcript proof: every call in the batch has its result persisted. Nested
   // code-mode work (exec status "waiting") keeps lifecycle items active while
   // the outer result is already recorded, so this is the weaker of the two.
@@ -287,6 +307,13 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
     // their exact synthetic placeholders; synthetic results for the latest batch
     // remain active and fail closed.
     attempt.itemLifecycle.activeCount === lateSyntheticPriorResults.size &&
+    attempt.itemLifecycle.completedCount + attempt.itemLifecycle.activeCount ===
+      attempt.itemLifecycle.startedCount;
+  const settledWithTerminalizedToolResults =
+    allToolCallsRecorded &&
+    terminalizedCurrentResults.size > 0 &&
+    attempt.itemLifecycle.activeCount ===
+      terminalizedCurrentResults.size + lateSyntheticPriorResults.size &&
     attempt.itemLifecycle.completedCount + attempt.itemLifecycle.activeCount ===
       attempt.itemLifecycle.startedCount;
   // Producer-recorded fact from the tool completion handler: one of this batch's
@@ -332,6 +359,7 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
     allToolCallsRecorded,
     allToolsProvenSettled,
     settledWithLateSyntheticPriorResults,
+    settledWithTerminalizedToolResults,
     parkedCodeModeRun,
     failedToolNames,
     lateSyntheticPriorFailureNames,

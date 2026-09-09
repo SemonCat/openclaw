@@ -34,6 +34,10 @@ type TransportDropScenario = {
   onSettledTranscriptModelFallback?: () => void;
   lateSyntheticPriorFailures?: boolean;
   latestToolResult?: "success" | "missing" | "absent";
+  terminalizedLatestMissingResult?: boolean;
+  terminalizedResultReason?: string;
+  terminalizedToolCalls?: ReadonlyArray<{ toolCallId: string; toolName: string }>;
+  startedCount?: number;
 };
 
 vi.mock("../../../infra/backoff.js", async (importOriginal) => ({
@@ -50,10 +54,17 @@ const disabledCompactionRuntime = {
 // Live shape: a code-mode exec batch settled, then the ChatGPT Responses stream
 // died while the model was still reasoning, so the errored turn is thinking-only.
 async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
+  const terminalizedLatestMissingResult = scenario.terminalizedLatestMissingResult === true;
   const priorToolCalls = scenario.lateSyntheticPriorFailures
     ? ["bash-prior-1", "bash-prior-2"]
-    : [];
-  const toolCalls = scenario.lateSyntheticPriorFailures ? ["exec-3ce0"] : ["call_1", "call_2"];
+    : terminalizedLatestMissingResult
+      ? ["bash-earlier"]
+      : [];
+  const toolCalls = scenario.lateSyntheticPriorFailures
+    ? ["exec-3ce0"]
+    : terminalizedLatestMissingResult
+      ? ["exec-a731"]
+      : ["call_1", "call_2"];
   const allToolCalls = [...priorToolCalls, ...toolCalls];
   const priorToolAssistants = priorToolCalls.map((id) =>
     buildEmbeddedRunnerAssistant({
@@ -61,9 +72,15 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
       content: [{ type: "toolCall", id, name: "bash", arguments: {} }],
     }),
   );
+  const latestToolName = terminalizedLatestMissingResult ? "bash" : "exec";
   const toolAssistant = buildEmbeddedRunnerAssistant({
     stopReason: "toolUse",
-    content: toolCalls.map((id) => ({ type: "toolCall", id, name: "exec", arguments: {} })),
+    content: toolCalls.map((id) => ({
+      type: "toolCall",
+      id,
+      name: latestToolName,
+      arguments: {},
+    })),
   });
   const erroredAssistant = buildEmbeddedRunnerAssistant({
     stopReason: "error",
@@ -81,35 +98,55 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
     content: scenario.content ?? [{ type: "thinking", thinking: "checking the results" }],
     usage: createMockUsage(0, 0),
   });
-  const messagesSnapshot = [
-    { role: "user", content: "why is it unauthorized?" },
-    ...priorToolAssistants,
-    toolAssistant,
-    ...(scenario.latestToolResult === "absent"
-      ? []
-      : toolCalls.map((id) => ({
+  const messagesSnapshot = terminalizedLatestMissingResult
+    ? ([
+        { role: "user", content: "wait for the Herdr agent" },
+        priorToolAssistants[0],
+        {
+          role: "toolResult",
+          toolCallId: "bash-earlier",
+          toolName: "bash",
+          isError: false,
+        },
+        toolAssistant,
+        {
+          role: "toolResult",
+          toolCallId: "exec-a731",
+          toolName: "bash",
+          isError: true,
+          details: { reason: scenario.terminalizedResultReason ?? "missing_tool_result" },
+        },
+        erroredAssistant,
+      ] as never)
+    : ([
+        { role: "user", content: "why is it unauthorized?" },
+        ...priorToolAssistants,
+        toolAssistant,
+        ...(scenario.latestToolResult === "absent"
+          ? []
+          : toolCalls.map((id) => ({
+              role: "toolResult",
+              toolCallId: id,
+              toolName: "exec",
+              isError: scenario.latestToolResult === "missing" || id === scenario.failedToolCallId,
+              ...(scenario.latestToolResult === "missing"
+                ? { details: { reason: "missing_tool_result" } }
+                : {}),
+            }))),
+        ...priorToolCalls.map((id) => ({
           role: "toolResult",
           toolCallId: id,
-          toolName: "exec",
-          isError: scenario.latestToolResult === "missing" || id === scenario.failedToolCallId,
-          ...(scenario.latestToolResult === "missing"
-            ? { details: { reason: "missing_tool_result" } }
-            : {}),
-        }))),
-    ...priorToolCalls.map((id) => ({
-      role: "toolResult",
-      toolCallId: id,
-      toolName: "bash",
-      isError: true,
-      details: { reason: "missing_tool_result" },
-    })),
-    erroredAssistant,
-  ] as never;
+          toolName: "bash",
+          isError: true,
+          details: { reason: "missing_tool_result" },
+        })),
+        erroredAssistant,
+      ] as never);
   const attempt = makeEmbeddedRunnerAttempt({
     messagesSnapshot,
     toolMetas: allToolCalls.map((toolCallId) => ({
       toolCallId,
-      toolName: toolCallId.startsWith("bash-") ? "bash" : "exec",
+      toolName: toolCallId.startsWith("bash-") ? "bash" : latestToolName,
       replaySafe: false,
       ...(scenario.codeModeSuspended ? { codeModeSuspended: true } : {}),
     })) as never,
@@ -117,17 +154,25 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
     currentAttemptAssistant: erroredAssistant,
     lastToolError:
       scenario.lastToolError ??
-      (scenario.lateSyntheticPriorFailures
+      (terminalizedLatestMissingResult
         ? { toolName: "bash", error: "missing tool result" }
-        : undefined),
+        : scenario.lateSyntheticPriorFailures
+          ? { toolName: "bash", error: "missing tool result" }
+          : undefined),
     itemLifecycle: {
-      startedCount: allToolCalls.length,
-      completedCount: scenario.lateSyntheticPriorFailures ? 1 : toolCalls.length,
+      startedCount: scenario.startedCount ?? allToolCalls.length,
+      completedCount: terminalizedLatestMissingResult
+        ? 1
+        : scenario.lateSyntheticPriorFailures
+          ? 1
+          : toolCalls.length,
       activeCount:
         scenario.activeCount ??
-        (scenario.lateSyntheticPriorFailures
-          ? priorToolCalls.length + (scenario.latestToolResult === "success" ? 0 : 1)
-          : 0),
+        (terminalizedLatestMissingResult
+          ? 1
+          : scenario.lateSyntheticPriorFailures
+            ? priorToolCalls.length + (scenario.latestToolResult === "success" ? 0 : 1)
+            : 0),
     },
     ...(scenario.promptError
       ? { terminal: { kind: "failed", source: "prompt", error: scenario.promptError } }
@@ -139,6 +184,13 @@ async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
       ? { currentAttemptReplayMetadata: { replaySafe: true, hadPotentialSideEffects: false } }
       : {}),
   });
+  if (terminalizedLatestMissingResult) {
+    Object.assign(attempt, {
+      terminalizedToolCalls: scenario.terminalizedToolCalls ?? [
+        { toolCallId: "exec-a731", toolName: "bash" },
+      ],
+    });
+  }
   const terminalState = resolveEmbeddedRunAttemptTerminalState({
     attempt,
     assistant: erroredAssistant,
@@ -505,6 +557,56 @@ describe("recoverEmbeddedRunAttempt", () => {
       expect(failoverRetryController.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
     },
   );
+
+  it("rotates after the terminal turn settles its latest accepted native command", async () => {
+    const promptError = Object.assign(
+      new Error(
+        "You've reached your Codex subscription usage limit. Next reset in 5 hours, Sep 9 at 8:57 PM GMT+8.",
+      ),
+      { status: 429 },
+    );
+    const {
+      recovery,
+      markOwnedTranscriptRetry,
+      continueFromCurrentTranscript,
+      failoverRetryController,
+    } = await recoverAfterTransportDrop({
+      promptError,
+      rateLimitRotationResult: true,
+      terminalizedLatestMissingResult: true,
+    });
+
+    expect(recovery).toMatchObject({ action: "retry", lastRetryFailoverReason: "rate_limit" });
+    expect(failoverRetryController.advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
+    expect(markOwnedTranscriptRetry).toHaveBeenCalledTimes(1);
+    expect(continueFromCurrentTranscript).toHaveBeenCalledWith({
+      includeToolFailureInstruction: true,
+    });
+  });
+
+  it.each([
+    [
+      "the owner evidence names an unaccepted call",
+      { terminalizedToolCalls: [{ toolCallId: "exec-unaccepted", toolName: "bash" }] },
+    ],
+    ["the terminal placeholder has an unrelated reason", { terminalizedResultReason: "unknown" }],
+    ["another lifecycle item remains active", { activeCount: 2, startedCount: 3 }],
+  ] as const)("keeps subscription-limit rotation closed when %s", async (_label, evidence) => {
+    const promptError = Object.assign(new Error("Codex subscription usage limit reached"), {
+      status: 429,
+    });
+    const { recovery, failoverRetryController, continueFromCurrentTranscript } =
+      await recoverAfterTransportDrop({
+        ...evidence,
+        promptError,
+        rateLimitRotationResult: true,
+        terminalizedLatestMissingResult: true,
+      });
+
+    expect(recovery).toEqual({ action: "proceed" });
+    expect(failoverRetryController.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
+    expect(continueFromCurrentTranscript).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["a tool is still active", { activeCount: 1 }],

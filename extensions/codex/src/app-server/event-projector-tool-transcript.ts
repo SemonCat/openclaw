@@ -140,6 +140,7 @@ export class CodexToolTranscriptProjection {
   private readonly messages: AgentMessage[] = [];
   private readonly callIds = new Set<string>();
   private readonly resultIds = new Set<string>();
+  private readonly syntheticMissingResultIds = new Set<string>();
   private readonly namesById = new Map<string, string>();
   private readonly trajectoryCallIds = new Set<string>();
   private readonly trajectoryResultIds = new Set<string>();
@@ -547,6 +548,7 @@ export class CodexToolTranscriptProjection {
     for (const id of missingTranscriptIds) {
       const name = this.namesById.get(id) ?? this.trajectoryNamesById.get(id);
       if (name) {
+        this.syntheticMissingResultIds.add(id);
         this.recordToolResult({
           id,
           name,
@@ -586,6 +588,10 @@ export class CodexToolTranscriptProjection {
     return missingCount === 1
       ? MISSING_TOOL_RESULT_ERROR
       : `${MISSING_TOOL_RESULT_ERROR} missingToolResultCount=${missingCount}`;
+  }
+
+  hasSyntheticMissingToolResult(toolCallId: string): boolean {
+    return this.syntheticMissingResultIds.has(toolCallId);
   }
 
   async readMirroredSessionMessages(signal?: AbortSignal): Promise<AgentMessage[]> {
