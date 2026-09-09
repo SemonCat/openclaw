@@ -48,6 +48,8 @@ export function resolveModelSelectionFromDirective(params: {
   agentDir: string;
   defaultProvider: string;
   defaultModel: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   aliasIndex: ModelAliasIndex;
   allowedModelKeys: Set<string>;
   modelPolicy?: ModelVisibilityPolicy;
@@ -69,11 +71,13 @@ export function resolveModelSelectionFromDirective(params: {
   }
 
   const raw = params.directives.rawModelDirective.trim();
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? params.defaultProvider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? params.defaultModel;
   if (/^default$/i.test(raw)) {
     return {
       modelSelection: {
-        provider: params.defaultProvider,
-        model: params.defaultModel,
+        provider: sessionDefaultProvider,
+        model: sessionDefaultModel,
         isDefault: true,
       },
     };
@@ -135,7 +139,14 @@ export function resolveModelSelectionFromDirective(params: {
   if (resolved.error) {
     return { errorText: resolved.error };
   }
-  const modelSelection = resolved.selection;
+  const modelSelection = resolved.selection
+    ? {
+        ...resolved.selection,
+        isDefault:
+          resolved.selection.provider === sessionDefaultProvider &&
+          resolved.selection.model === sessionDefaultModel,
+      }
+    : undefined;
 
   let profileOverride: string | undefined;
   let validateAuthProfileSelection: (() => string | undefined) | undefined;

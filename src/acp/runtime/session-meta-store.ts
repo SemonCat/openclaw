@@ -99,6 +99,23 @@ export function resolveSessionStorePathForAcp(params: {
   };
 }
 
+/** Resolves a list candidate, omitting only ownerless raw compatibility keys. */
+export function resolveListableSessionStorePathForAcp(params: {
+  sessionKey: string;
+  agentId?: string;
+  cfg?: OpenClawConfig;
+  env?: NodeJS.ProcessEnv;
+}): ReturnType<typeof resolveSessionStorePathForAcp> | undefined {
+  try {
+    return resolveSessionStorePathForAcp(params);
+  } catch (error) {
+    if (params.agentId === undefined && error instanceof AgentSelectionRequiredError) {
+      return undefined;
+    }
+    throw error;
+  }
+}
+
 /** Reads the canonical session binding while retaining ACP's logical key. */
 export function readSessionEntryFromStore(params: {
   sessionKey: string;

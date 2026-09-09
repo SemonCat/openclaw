@@ -1,5 +1,6 @@
 /** Owns side-effect-sensitive retry and silent-reply recovery policy. */
 import { hasOnlyAssistantReasoningContent } from "@openclaw/ai/internal/shared";
+import { isRecord } from "@openclaw/normalization-core/record-coerce";
 import { MALFORMED_TOOL_CALL_ARGUMENTS_ERROR_CODE } from "../../../llm/types.js";
 import { isTerminalAssistantError } from "../../../llm/utils/retry.js";
 import { hasAcceptedSessionSpawn } from "../../accepted-session-spawn.js";
@@ -198,7 +199,12 @@ export function resolveReasoningOnlyRetryInstruction(params: {
 }
 
 type SettledToolCall = { id: string | null; name: string | null };
-type SettledToolResult = { toolCallId?: unknown; toolName?: unknown; isError?: unknown };
+type SettledToolResult = {
+  toolCallId?: unknown;
+  toolName?: unknown;
+  isError?: unknown;
+  details?: unknown;
+};
 
 function readSettledToolCalls(
   message: EmbeddedRunAttemptResult["currentAttemptAssistant"] | null | undefined,
@@ -236,15 +242,35 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
     assistant = candidate?.role === "assistant" ? candidate : undefined;
   }
   const requestedToolCalls = readSettledToolCalls(assistant);
+  const priorRequestedToolCalls = snapshot
+    .slice(latestUserIndex + 1, Math.max(latestUserIndex + 1, assistantIndex))
+    .flatMap((message) => (message.role === "assistant" ? readSettledToolCalls(message) : []));
   // Results must follow their owning assistant; session-wide reused ids cannot settle a new turn.
   const settledToolResults = new Map(
     (assistantIndex >= 0 ? snapshot.slice(assistantIndex + 1) : []).flatMap((message) => {
-      const { toolCallId, toolName, isError } = message as SettledToolResult;
+      const { toolCallId, toolName, isError, details } = message as SettledToolResult;
       return message.role === "toolResult" &&
         typeof toolCallId === "string" &&
         typeof toolName === "string"
-        ? [[toolCallId, { toolName, isError: isError === true }] as const]
+        ? [[toolCallId, { toolName, isError: isError === true, details }] as const]
         : [];
+    }),
+  );
+  const currentToolCallIds = new Set(requestedToolCalls.flatMap(({ id }) => (id ? [id] : [])));
+  const lateSyntheticPriorResults = new Map(
+    [...settledToolResults].flatMap(([id, result]) => {
+      if (
+        currentToolCallIds.has(id) ||
+        !result.isError ||
+        !isRecord(result.details) ||
+        result.details.reason !== "missing_tool_result"
+      ) {
+        return [];
+      }
+      const owners = priorRequestedToolCalls.filter(
+        (call) => call.id === id && call.name === result.toolName,
+      );
+      return owners.length === 1 ? ([[id, result]] as const) : [];
     }),
   );
   // Transcript proof: every call in the batch has its result persisted. Nested
@@ -261,6 +287,15 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
     attempt.itemLifecycle.startedCount > 0 &&
     attempt.itemLifecycle.completedCount === attempt.itemLifecycle.startedCount &&
     attempt.itemLifecycle.activeCount === 0;
+  const settledWithLateSyntheticPriorResults =
+    allToolCallsRecorded &&
+    lateSyntheticPriorResults.size > 0 &&
+    // A later tool batch proves Codex accepted the earlier calls. Reconcile only
+    // their exact synthetic placeholders; synthetic results for the latest batch
+    // remain active and fail closed.
+    attempt.itemLifecycle.activeCount === lateSyntheticPriorResults.size &&
+    attempt.itemLifecycle.completedCount + attempt.itemLifecycle.activeCount ===
+      attempt.itemLifecycle.startedCount;
   // Producer-recorded fact from the tool completion handler: one of this batch's
   // exec results parked a Code Mode run, which is the only legitimate reason a
   // fully recorded batch still shows active lifecycle items.
@@ -281,6 +316,9 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
     assistant?.stopReason === "toolUse" &&
     allToolsProvenSettled &&
     failedToolNames.size === 0,
+  );
+  const lateSyntheticPriorFailureNames = new Set(
+    [...lateSyntheticPriorResults.values()].map((result) => result.toolName),
   );
   // ToolErrorSummary has no call id: its owner must match a failed result in the
   // proven terminal batch, or a stale/unrelated error could authorize continuation.
@@ -309,9 +347,11 @@ export function resolveSettledToolBatchEvidence(attempt: IncompleteTurnAttempt) 
     assistant,
     allToolCallsRecorded,
     allToolsProvenSettled,
+    settledWithLateSyntheticPriorResults,
     parkedCodeModeRun,
     failedToolNames,
     hasStaleToolError,
+    lateSyntheticPriorFailureNames,
     hasUnsettledToolError,
     intentionalTermination,
   };
