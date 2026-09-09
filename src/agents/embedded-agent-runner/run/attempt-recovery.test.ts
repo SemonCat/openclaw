@@ -19,6 +19,7 @@ import {
 import { createEmbeddedRunContextRecoveryState } from "./context-recovery-state.js";
 import { resolveEmbeddedRunAttemptTerminalState } from "./terminal-outcome.js";
 
+
 vi.mock("../../../infra/backoff.js", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../infra/backoff.js")>()),
   sleepWithAbort: vi.fn(async () => {}),
@@ -567,6 +568,56 @@ describe("recoverEmbeddedRunAttempt", () => {
       expect(failoverRetryController.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
     },
   );
+
+  it("rotates after the terminal turn settles its latest accepted native command", async () => {
+    const promptError = Object.assign(
+      new Error(
+        "You've reached your Codex subscription usage limit. Next reset in 5 hours, Sep 9 at 8:57 PM GMT+8.",
+      ),
+      { status: 429 },
+    );
+    const {
+      recovery,
+      markOwnedTranscriptRetry,
+      continueFromCurrentTranscript,
+      failoverRetryController,
+    } = await recoverAfterTransportDrop({
+      promptError,
+      rateLimitRotationResult: true,
+      terminalizedLatestMissingResult: true,
+    });
+
+    expect(recovery).toMatchObject({ action: "retry", lastRetryFailoverReason: "rate_limit" });
+    expect(failoverRetryController.advanceRateLimitAuthProfile).toHaveBeenCalledTimes(1);
+    expect(markOwnedTranscriptRetry).toHaveBeenCalledTimes(1);
+    expect(continueFromCurrentTranscript).toHaveBeenCalledWith({
+      includeToolFailureInstruction: true,
+    });
+  });
+
+  it.each([
+    [
+      "the owner evidence names an unaccepted call",
+      { terminalizedToolCalls: [{ toolCallId: "exec-unaccepted", toolName: "bash" }] },
+    ],
+    ["the terminal placeholder has an unrelated reason", { terminalizedResultReason: "unknown" }],
+    ["another lifecycle item remains active", { activeCount: 2, startedCount: 3 }],
+  ] as const)("keeps subscription-limit rotation closed when %s", async (_label, evidence) => {
+    const promptError = Object.assign(new Error("Codex subscription usage limit reached"), {
+      status: 429,
+    });
+    const { recovery, failoverRetryController, continueFromCurrentTranscript } =
+      await recoverAfterTransportDrop({
+        ...evidence,
+        promptError,
+        rateLimitRotationResult: true,
+        terminalizedLatestMissingResult: true,
+      });
+
+    expect(recovery).toEqual({ action: "proceed" });
+    expect(failoverRetryController.advanceRateLimitAuthProfile).not.toHaveBeenCalled();
+    expect(continueFromCurrentTranscript).not.toHaveBeenCalled();
+  });
 
   it.each([
     ["a tool is still active", { activeCount: 1 }],
