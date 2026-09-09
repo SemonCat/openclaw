@@ -589,6 +589,76 @@ describe("applySessionModelSelection", () => {
     expect(sessionEntry.modelOverride).toBe(expectedOverride);
   });
 
+  it("uses the effective session default when classifying an explicit selection", async () => {
+    const sessionEntry = createEntry();
+
+    await applySessionModelSelection(
+      createParams({
+        sessionEntry,
+        sessionDefaultProvider: "openai",
+        sessionDefaultModel: "gpt-4o",
+        request: {
+          provider: "anthropic",
+          model: "claude-opus-4-6",
+          isDefault: true,
+          runtime: { kind: "unchanged" },
+        },
+      }),
+    );
+
+    expect(sessionEntry).toMatchObject({
+      providerOverride: "anthropic",
+      modelOverride: "claude-opus-4-6",
+      modelOverrideSource: "user",
+    });
+  });
+
+  it("clears overrides when resetting to the effective session default", async () => {
+    const sessionEntry = createEntry({
+      providerOverride: "anthropic",
+      modelOverride: "claude-opus-4-6",
+      modelOverrideSource: "user",
+      modelOverrideRouteResolution: "resolved",
+    });
+
+    await applySessionModelSelection(
+      createParams({
+        sessionEntry,
+        sessionDefaultProvider: "openai",
+        sessionDefaultModel: "gpt-4o",
+        request: {
+          provider: "openai",
+          model: "gpt-4o",
+          isDefault: false,
+          runtime: { kind: "unchanged" },
+        },
+      }),
+    );
+
+    expect(sessionEntry.providerOverride).toBeUndefined();
+    expect(sessionEntry.modelOverride).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBeUndefined();
+  });
+
+  it("does not persist an explicit selection of the effective session default", async () => {
+    const result = await applySessionModelSelection(
+      createParams({
+        canPersistStickyModelSelection: true,
+        sessionDefaultProvider: "openai",
+        sessionDefaultModel: "gpt-4o",
+        request: {
+          provider: "openai",
+          model: "gpt-4o",
+          isDefault: false,
+          runtime: { kind: "unchanged" },
+        },
+      }),
+    );
+
+    expect(result).not.toHaveProperty("configuredDefaultUpdate");
+    expect(effects.mutateConfigFileWithRetry).not.toHaveBeenCalled();
+  });
+
   it.each([
     {
       name: "set",

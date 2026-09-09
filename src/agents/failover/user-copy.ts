@@ -122,7 +122,7 @@ function extractProviderRateLimitMessage(raw: string): string | undefined {
   ) {
     return undefined;
   }
-  return `⚠️ ${trimmed}`;
+  return `⚠️ ${trimmed.replace(/^(?:⚠️\s*)+/u, "")}`;
 }
 
 function renderRateLimitBaseCopy(context: FailoverUserCopyContext): string {

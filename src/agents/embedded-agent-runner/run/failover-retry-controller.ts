@@ -7,11 +7,7 @@ import {
 } from "../../auth-profiles.js";
 import { revokeRuntimeAuthMaterializations } from "../../auth-profiles/runtime-materializations.js";
 import type { FailoverReason } from "../../embedded-agent-helpers.js";
-import {
-  FailoverError,
-  resolveFailoverReasonFromError,
-  resolveFailoverStatus,
-} from "../../failover-error.js";
+import { resolveFailoverReasonFromError } from "../../failover-error.js";
 import { hasLongWindowRateLimitEvidence } from "../../failover/retry-evidence.js";
 import { isConfigBackedInlineProviderApiKey, type ResolvedProviderAuth } from "../../model-auth.js";
 import { log } from "../logger.js";
@@ -23,7 +19,6 @@ import type { prepareEmbeddedRunRuntime } from "./runtime-preparation.js";
 
 const MAX_RATE_LIMIT_ATTEMPTS = 10;
 const MAX_OVERLOAD_PROFILE_ROTATIONS = 1;
-const MAX_RATE_LIMIT_PROFILE_ROTATIONS = 1;
 const RETRY_SLEEP_CHUNK_MS = 24 * 60 * 60 * 1000;
 
 type PreparedRuntime = Awaited<ReturnType<typeof prepareEmbeddedRunRuntime>>;
@@ -32,37 +27,19 @@ export type EmbeddedRunFailoverRetryController = ReturnType<
 >;
 type AuthRetryTrace = TraceAttempt & { reason: FailoverReason };
 
-type RateLimitAuthProfileContext = {
-  failoverProvider: string;
-  failoverModel: string;
-  logFallbackDecision: (decision: "fallback_model", extra?: { status?: number }) => void;
-};
-
 export function createEmbeddedRunFailoverRetryController(input: {
   runParams: PreparedEmbeddedRunInput["runParams"];
   provider: string;
   modelId: string;
-  globalLane: string;
   agentDir: string;
-  fallbackConfigured: boolean;
   profileFailureStore: PreparedRuntime["profileFailureStore"];
   getLastProfileId: () => string | undefined;
-  getSessionId: () => string;
   harnessOwnsTransport: () => boolean;
   getRuntimeAuthOwnerId: () => string;
   getApiKeyInfo: () => ResolvedProviderAuth | null;
   advanceAuthProfile: PreparedRuntime["advanceAttemptAuthProfile"];
 }) {
-  const {
-    runParams: params,
-    provider,
-    modelId,
-    globalLane,
-    agentDir,
-    fallbackConfigured,
-    profileFailureStore,
-  } = input;
-  let rateLimitProfileRotations = 0;
+  const { runParams: params, provider, modelId, agentDir, profileFailureStore } = input;
   let transientRetryCount = 0;
   let rateLimitSeen = false;
   let transientRetryBudget: number | undefined;
@@ -147,31 +124,10 @@ export function createEmbeddedRunFailoverRetryController(input: {
       transientRetryBudget = maxRetries;
     },
     advanceAuthProfile: input.advanceAuthProfile,
-    advanceRateLimitAuthProfile: async (context: RateLimitAuthProfileContext): Promise<boolean> => {
-      if (rateLimitProfileRotations >= MAX_RATE_LIMIT_PROFILE_ROTATIONS && fallbackConfigured) {
-        const status = resolveFailoverStatus("rate_limit");
-        log.warn(
-          `rate-limit profile rotation cap reached for ${sanitizeForLog(provider)}/${sanitizeForLog(modelId)} after ${rateLimitProfileRotations} rotations; escalating to model fallback`,
-        );
-        context.logFallbackDecision("fallback_model", { status });
-        throw new FailoverError(
-          "The AI service is temporarily rate-limited. Please try again in a moment.",
-          {
-            reason: "rate_limit",
-            provider: context.failoverProvider,
-            model: context.failoverModel,
-            profileId: input.getLastProfileId(),
-            sessionId: input.getSessionId(),
-            lane: globalLane,
-            status,
-          },
-        );
-      }
-      const rotated = await input.advanceAuthProfile();
-      if (rotated) {
-        rateLimitProfileRotations += 1;
-      }
-      return rotated;
+    advanceRateLimitAuthProfile: async (): Promise<boolean> => {
+      // Candidate traversal is monotonic. Only its false result proves that
+      // every configured account for this model has been exhausted.
+      return await input.advanceAuthProfile();
     },
     maybeMarkAuthProfileFailure,
     resolveAuthProfileFailureReason: resolveProfileFailureReason,

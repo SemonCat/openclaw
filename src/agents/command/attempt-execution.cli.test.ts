@@ -4086,6 +4086,42 @@ describe("CLI attempt execution", () => {
     },
   );
 
+  it("preserves the objective in the embedded prompt after settled transcript fallback", async () => {
+    const originalBody = "perform the original side-effecting task";
+    const fallbackRuntimeState: NonNullable<RunAgentAttemptParams["fallbackRuntimeState"]> = {
+      originRuntime: "embedded",
+      continueFromSettledTranscript: true,
+    };
+
+    const embeddedArg = await runOpenClawEmbeddedAttemptForTest({
+      runId: "embedded-settled-transcript-fallback",
+      body: originalBody,
+      isFallbackRetry: true,
+      fallbackRuntimeState,
+    });
+
+    expect(embeddedArg.prompt).toContain("Continue from the current transcript");
+    expect(embeddedArg.prompt).toContain("Original user request");
+    expect(embeddedArg.prompt).toContain(originalBody);
+    expect(embeddedArg.skipPreparedUserTurnMessage).toBe(true);
+  });
+
+  it("lets an embedded attempt arm continuation for the next fallback model", async () => {
+    const fallbackRuntimeState: NonNullable<RunAgentAttemptParams["fallbackRuntimeState"]> = {};
+    const embeddedArg = await runOpenClawEmbeddedAttemptForTest({
+      runId: "embedded-arm-settled-transcript-fallback",
+      fallbackRuntimeState,
+    });
+
+    const armContinuation = embeddedArg.onSettledTranscriptModelFallback;
+    expect(armContinuation).toEqual(expect.any(Function));
+    if (typeof armContinuation !== "function") {
+      throw new Error("expected settled transcript fallback callback");
+    }
+    armContinuation();
+    expect(fallbackRuntimeState.continueFromSettledTranscript).toBe(true);
+  });
+
   it("records raw CLI-shaped model runs as embedded origins", async () => {
     const images = [{ type: "image" as const, data: "aGVsbG8=", mimeType: "image/png" }];
     const fallbackRuntimeState: NonNullable<RunAgentAttemptParams["fallbackRuntimeState"]> = {};
