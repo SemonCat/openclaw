@@ -30,8 +30,13 @@ export type TransportDropScenario = {
   noTools?: boolean;
   lastToolError?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["lastToolError"];
   pluginHarnessOwnsTransport?: boolean;
+  promptError?: Error;
+  rateLimitRotationResult?: boolean;
   retryAvailable?: boolean;
   replaySafe?: boolean;
+  onSettledTranscriptModelFallback?: () => void;
+  lateSyntheticPriorFailures?: boolean;
+  latestToolResult?: "success" | "missing" | "absent";
   terminal?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["terminal"];
   usage?: AssistantMessage["usage"];
   terminate?: boolean;
@@ -47,7 +52,21 @@ export const disabledCompactionRuntime = {
 // Live shape: a code-mode exec batch settled, then the ChatGPT Responses stream
 // died while the model was still reasoning, so the errored turn is thinking-only.
 export async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
-  const toolCalls = scenario.noTools ? [] : ["call_1", "call_2"];
+  const priorToolCalls = scenario.lateSyntheticPriorFailures
+    ? ["bash-prior-1", "bash-prior-2"]
+    : [];
+  const toolCalls = scenario.noTools
+    ? []
+    : scenario.lateSyntheticPriorFailures
+      ? ["exec-3ce0"]
+      : ["call_1", "call_2"];
+  const allToolCalls = [...priorToolCalls, ...toolCalls];
+  const priorToolAssistants = priorToolCalls.map((id) =>
+    buildEmbeddedRunnerAssistant({
+      stopReason: "toolUse",
+      content: [{ type: "toolCall", id, name: "bash", arguments: {} }],
+    }),
+  );
   const toolAssistant = buildEmbeddedRunnerAssistant({
     stopReason: "toolUse",
     content: toolCalls.map((id) => ({ type: "toolCall", id, name: "exec", arguments: {} })),
@@ -74,23 +93,36 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
   });
   const messagesSnapshot = [
     { role: "user", content: "why is it unauthorized?" },
+    ...priorToolAssistants,
     ...(toolCalls.length > 0 ? [toolAssistant] : []),
-    ...toolCalls
-      .filter((id) => !scenario.missingToolResult || id !== "call_2")
-      .map((id) => ({
-        role: "toolResult",
-        toolCallId: id,
-        toolName: "exec",
-        isError: id === scenario.failedToolCallId,
-      })),
+    ...(scenario.latestToolResult === "absent"
+      ? []
+      : toolCalls
+          .filter((id) => !scenario.missingToolResult || id !== "call_2")
+          .map((id) => ({
+            role: "toolResult",
+            toolCallId: id,
+            toolName: "exec",
+            isError: scenario.latestToolResult === "missing" || id === scenario.failedToolCallId,
+            ...(scenario.latestToolResult === "missing"
+              ? { details: { reason: "missing_tool_result" } }
+              : {}),
+          }))),
+    ...priorToolCalls.map((id) => ({
+      role: "toolResult",
+      toolCallId: id,
+      toolName: "bash",
+      isError: true,
+      details: { reason: "missing_tool_result" },
+    })),
     erroredAssistant,
   ] as never;
   const attempt = makeEmbeddedRunnerAttempt({
     assistantTexts: scenario.assistantTexts ?? [],
     messagesSnapshot,
-    toolMetas: toolCalls.map((toolCallId) => ({
+    toolMetas: allToolCalls.map((toolCallId) => ({
       toolCallId,
-      toolName: "exec",
+      toolName: toolCallId.startsWith("bash-") ? "bash" : "exec",
       replaySafe: false,
       ...(scenario.asyncStarted ? { asyncStarted: true } : {}),
       ...(scenario.terminate ? { terminate: true } : {}),
@@ -101,14 +133,26 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     ...(scenario.completedAssistant
       ? { currentAttemptCompletedAssistant: scenario.completedAssistant }
       : {}),
-    lastToolError: scenario.lastToolError,
+    lastToolError:
+      scenario.lastToolError ??
+      (scenario.lateSyntheticPriorFailures
+        ? { toolName: "bash", error: "missing tool result" }
+        : undefined),
     didSendDeterministicApprovalPrompt: scenario.didSendDeterministicApprovalPrompt,
     itemLifecycle: {
-      startedCount: toolCalls.length,
-      completedCount: toolCalls.length,
-      activeCount: scenario.activeCount ?? 0,
+      startedCount: allToolCalls.length,
+      completedCount: scenario.lateSyntheticPriorFailures ? 1 : toolCalls.length,
+      activeCount:
+        scenario.activeCount ??
+        (scenario.lateSyntheticPriorFailures
+          ? priorToolCalls.length + (scenario.latestToolResult === "success" ? 0 : 1)
+          : 0),
     },
-    ...(scenario.terminal ? { terminal: scenario.terminal } : {}),
+    ...(scenario.promptError
+      ? { terminal: { kind: "failed", source: "prompt", error: scenario.promptError } }
+      : scenario.terminal
+        ? { terminal: scenario.terminal }
+        : {}),
     ...(scenario.yieldDetected ? { yieldDetected: true } : {}),
     ...(scenario.replaySafe
       ? { currentAttemptReplayMetadata: { replaySafe: true, hadPotentialSideEffects: false } }
@@ -130,17 +174,21 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     globalLane: "test",
     agentDir: "/tmp/provider-recovery-test",
     fallbackConfigured: false,
-    profileFailureStore: { version: 1, profiles: {} },
-    getLastProfileId: () => undefined,
+    profileFailureStore: {
+      version: 1,
+      profiles: { "openai:test-profile": { type: "oauth", provider: "openai" } },
+    },
+    getLastProfileId: () => "openai:test-profile",
     getSessionId: () => "session:transport-drop",
     harnessOwnsTransport: () => scenario.pluginHarnessOwnsTransport ?? false,
     getRuntimeAuthOwnerId: () => "embedded",
     getApiKeyInfo: () => null,
-    advanceAuthProfile: vi.fn(async () => false),
+    advanceAuthProfile: vi.fn(async () => scenario.rateLimitRotationResult ?? false),
   });
   if (scenario.retryAvailable === false) {
     failoverRetryController.setTransientRetryBudget(0);
   }
+  vi.spyOn(failoverRetryController, "advanceRateLimitAuthProfile");
   vi.spyOn(failoverRetryController, "maybeMarkAuthProfileFailure");
   const onAgentEvent = vi.fn();
   const recover = () =>
@@ -152,22 +200,34 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
           sessionId: "session:transport-drop",
           runId: "run:transport-drop",
           onAgentEvent,
+          onSettledTranscriptModelFallback: scenario.onSettledTranscriptModelFallback,
         },
         resolvedSessionKey: "agent:main:transport-drop",
+        agentDir: "/tmp/provider-recovery-test",
+        globalLane: "test",
+        fallbackConfigured: true,
         startedAtMs: Date.now(),
         laneController: { throwIfAborted: vi.fn() },
+        suspendForFailure: vi.fn(),
       },
       preparedRuntime: {
         provider: "openai",
         modelId: "gpt-5.6-luna",
         model: { id: "gpt-5.6-luna" },
         genericCompactionRecoveryAllowed: scenario.compactionEnabled ?? false,
+        attemptAuthProfileStore: {
+          version: 1,
+          profiles: { "openai:test-profile": { type: "oauth", provider: "openai" } },
+        },
+        maybeRefreshRuntimeAuthForAuthError: vi.fn(async () => false),
+        setThinkLevel: vi.fn(),
         snapshot: () => ({
           thinkLevel: "off",
           agentHarness: { id: "openclaw" },
           outerContextTokenMeta: {},
           contextTokenBudget: scenario.compactionEnabled ? 200_000 : undefined,
           pluginHarnessOwnsTransport: scenario.pluginHarnessOwnsTransport ?? false,
+          lastProfileId: "openai:test-profile",
         }),
       },
       normalizedAttempt: {

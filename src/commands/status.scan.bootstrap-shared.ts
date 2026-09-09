@@ -121,9 +121,6 @@ export async function createStatusScanCoreBootstrap<TAgentStatus>(
         includeRegistry: params.includeRegistryUpdate ?? true,
         updateConfigChannel: params.cfg.update?.channel ?? null,
       });
-  const agentStatusPromise = skipColdStartNetworkChecks
-    ? Promise.resolve(buildColdStartAgentLocalStatuses() as TAgentStatus)
-    : params.getAgentLocalStatuses(params.cfg);
   const gatewayProbePromise = params.gatewaySnapshot
     ? Promise.resolve(params.gatewaySnapshot)
     : measureCliCommandStartup(
@@ -141,9 +138,22 @@ export async function createStatusScanCoreBootstrap<TAgentStatus>(
               ...(skipColdStartNetworkChecks ? { skipProbe: true } : {}),
               localStatusRpcFallback: params.includeLocalStatusRpcFallback !== false,
             },
-          }),
+        }),
         { config: params.cfg, env: params.env },
       );
+  const agentStatusPromise = skipColdStartNetworkChecks
+    ? Promise.resolve(buildColdStartAgentLocalStatuses() as TAgentStatus)
+    : (async () => {
+        // Agent-store inspection performs synchronous SQLite work. Let the
+        // network probe finish first so that work cannot starve its socket and
+        // timeout timers, causing a healthy Gateway to be reported offline.
+        try {
+          await gatewayProbePromise;
+        } catch {
+          // Agent status is still useful when gateway probing itself fails.
+        }
+        return await params.getAgentLocalStatuses(params.cfg);
+      })();
 
   return {
     tailscaleMode,

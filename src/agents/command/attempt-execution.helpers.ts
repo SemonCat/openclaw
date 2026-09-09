@@ -31,6 +31,7 @@ import {
 import { buildAgentRunTerminalReplySnapshot } from "../agent-run-terminal-reply.js";
 import type { AgentRunTerminalReplySnapshot } from "../agent-run-terminal-reply.types.js";
 import { cliBackendLog } from "../cli-runner/log.js";
+import { buildTranscriptContinuationPrompt } from "../transcript-continuation-prompt.js";
 import { resolveClaudeCliProjectDirForWorkspace } from "./claude-cli-project-dir.js";
 
 const CLAUDE_CLI_TRANSCRIPT_MAX_RECORDS = 500;
@@ -295,11 +296,16 @@ export function resolveFallbackRetryPrompt(params: {
   isFallbackRetry: boolean;
   sessionHasHistory?: boolean;
   priorContextPrelude?: string;
+  continueFromSettledTranscript?: boolean;
 }): string {
   if (!params.isFallbackRetry) {
     return params.body;
   }
   const prelude = params.priorContextPrelude?.trim();
+  if (params.continueFromSettledTranscript) {
+    const continuation = buildTranscriptContinuationPrompt(params.body);
+    return prelude ? `${prelude}\n\n${continuation}` : continuation;
+  }
   if (!params.sessionHasHistory && !prelude) {
     return params.body;
   }

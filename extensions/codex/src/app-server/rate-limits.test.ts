@@ -76,9 +76,60 @@ describe("formatCodexUsageLimitErrorMessage", () => {
     expect(message).not.toContain("Codex did not return a reset time");
   });
 
+  it("preserves an already-enriched reset hint when snapshots are unavailable", () => {
+    const message = formatCodexUsageLimitErrorMessage({
+      message:
+        "You've reached your Codex subscription usage limit. Next reset in 4 hours, Sep 8 at 2:42 PM GMT+8.",
+      codexErrorInfo: "usageLimitExceeded",
+    });
+
+    expect(message).toContain("Next reset in 4 hours, Sep 8 at 2:42 PM GMT+8.");
+    expect(message?.match(/Next reset/gu)).toHaveLength(1);
+    expect(message).toContain("Wait until the reset time");
+    expect(message).not.toContain("could not determine a reset time");
+  });
+
+  it("does not promote malformed reset prose", () => {
+    for (const malformed of [
+      "Next reset information is unavailable.",
+      "Next reset in the account status documentation.",
+      "Diagnostic note: Next reset in 4 hours, Sep 8 at 2:42 PM GMT+8.",
+      "You've reached your Codex subscription usage limit. Diagnostic note: Next reset in 4 hours, Sep 8 at 2:42 PM GMT+8.",
+    ]) {
+      const message = formatCodexUsageLimitErrorMessage({
+        message: malformed,
+        codexErrorInfo: "usageLimitExceeded",
+      });
+
+      expect(message).toContain("OpenClaw could not determine a reset time from Codex.");
+      expect(message).not.toContain(malformed);
+      expect(message).not.toContain("Next reset");
+    }
+  });
+
+  it("does not reuse an enriched reset hint over an authoritative blocked snapshot", () => {
+    const message = formatCodexUsageLimitErrorMessage({
+      message:
+        "You've reached your Codex subscription usage limit. Next reset in 4 hours, Sep 8 at 2:42 PM GMT+8.",
+      codexErrorInfo: "usageLimitExceeded",
+      rateLimits: {
+        rateLimits: {
+          limitId: "codex",
+          primary: { usedPercent: 100, windowDurationMins: 300, resetsAt: null },
+          secondary: null,
+        },
+      },
+      rateLimitsAuthoritative: true,
+    });
+
+    expect(message).toContain("OpenClaw could not determine a reset time from Codex.");
+    expect(message).not.toContain("Next reset");
+  });
+
   it("accepts snake_case rate limit snapshots from Codex core payloads", () => {
     const message = formatCodexUsageLimitErrorMessage({
-      message: "You've reached your usage limit.",
+      message:
+        "You've reached your Codex subscription usage limit. Next reset in 4 hours, Sep 8 at 2:42 PM GMT+8.",
       codexErrorInfo: "usageLimitExceeded",
       rateLimits: {
         rate_limits: {
@@ -91,6 +142,8 @@ describe("formatCodexUsageLimitErrorMessage", () => {
     });
 
     expect(message).toContain("Next reset in 1 hour, ");
+    expect(message?.match(/Next reset/gu)).toHaveLength(1);
+    expect(message).not.toContain("Next reset in 4 hours");
     expect(message).toContain("Wait until the reset time");
     expect(message).toMatch(/\b[A-Z][a-z]{2} \d{1,2}(?:, \d{4})? at \d{1,2}:\d{2} [AP]M\b/u);
     expect(message).not.toMatch(/\(\d{4}-\d{2}-\d{2}T/u);

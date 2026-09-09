@@ -1,6 +1,6 @@
 import { resolveAgentDir, type AgentModelPrimaryWriteTarget } from "../agents/agent-scope.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.js";
-import { modelKey, resolveDefaultModelForAgent } from "../agents/model-selection.js";
+import { modelKey } from "../agents/model-selection.js";
 import {
   createModelVisibilityPolicy,
   type ModelVisibilityPolicy,
@@ -60,6 +60,9 @@ export type ApplySessionModelSelectionParams = {
   allowCreate?: boolean;
   defaultProvider: string;
   defaultModel: string;
+  /** Effective default for this session after channel/thread routing policy. */
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   currentProvider: string;
   currentModel: string;
   modelPolicy?: Omit<ModelVisibilityPolicy, "catalog">;
@@ -199,8 +202,10 @@ export async function applySessionModelSelection(
   }
 
   const resetToDefault = params.request.resetToDefault === true;
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? params.defaultProvider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? params.defaultModel;
   const selectedRef = resetToDefault
-    ? resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId })
+    ? { provider: sessionDefaultProvider, model: sessionDefaultModel }
     : params.request;
   const normalizedModelKey = modelKey(selectedRef.provider, selectedRef.model);
   const request: SessionModelSelectionRequest = {
@@ -209,7 +214,7 @@ export async function applySessionModelSelection(
     model: selectedRef.model,
     isDefault:
       resetToDefault ||
-      normalizedModelKey === modelKey(params.defaultProvider, params.defaultModel),
+      normalizedModelKey === modelKey(sessionDefaultProvider, sessionDefaultModel),
   };
   const policy =
     params.modelPolicy ??
@@ -223,7 +228,6 @@ export async function applySessionModelSelection(
   if (!resetToDefault && !policy.allows(request)) {
     return rejectNotAllowed(request.provider, request.model);
   }
-
   const prepared = await prepareModelSelectionRuntime({
     cfg: params.cfg,
     agentId: params.agentId,
