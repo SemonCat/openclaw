@@ -196,6 +196,63 @@ describe("CodexAppServerEventProjector terminal errors", () => {
     });
     expect(readAttemptTerminal(result).promptError).toContain("without a matching tool.result");
     expect(result.lastToolError).toBeUndefined();
+    expect(result.terminalizedToolCalls).toBeUndefined();
+  });
+
+  it("identifies a missing native command result terminalized by a usage-limit turn", async () => {
+    const projector = await createProjector();
+    const completedCommand = {
+      type: "commandExecution",
+      id: "bash-earlier",
+      command: "/bin/bash -lc true",
+      cwd: "/workspace",
+      processId: null,
+      source: "agent",
+      status: "completed",
+      commandActions: [],
+      aggregatedOutput: "",
+      exitCode: 0,
+      durationMs: 12,
+    };
+
+    await projector.handleNotification(
+      forCurrentTurn("item/started", { item: { ...completedCommand, status: "inProgress" } }),
+    );
+    await projector.handleNotification(
+      forCurrentTurn("item/completed", { item: completedCommand }),
+    );
+    await projector.handleNotification(pendingCommandStarted("exec-a731"));
+    await projector.handleNotification(
+      forCurrentTurn("turn/completed", {
+        turn: {
+          id: TURN_ID,
+          status: "failed",
+          items: [],
+          error: {
+            message:
+              "You've reached your Codex subscription usage limit. Next reset in 5 hours, Sep 9 at 8:57 PM GMT+8.",
+            codexErrorInfo: "usageLimitExceeded",
+          },
+        },
+      }),
+    );
+
+    const result = projector.buildResult(buildEmptyToolTelemetry());
+
+    expect(result.itemLifecycle).toEqual({ startedCount: 2, completedCount: 1, activeCount: 1 });
+    expect(result.terminalizedToolCalls).toEqual([{ toolCallId: "exec-a731", toolName: "bash" }]);
+    expect(result.messagesSnapshot).toContainEqual(
+      expect.objectContaining({
+        role: "toolResult",
+        toolCallId: "exec-a731",
+        toolName: "bash",
+        isError: true,
+        details: { reason: "missing_tool_result" },
+      }),
+    );
+    expect(expectUsageLimitPromptError(readAttemptTerminal(result).promptError).message).toContain(
+      "Next reset in 5 hours, Sep 9 at 8:57 PM GMT+8.",
+    );
   });
 
   it("does not fail a completed reply after a retryable app-server error notification", async () => {

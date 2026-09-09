@@ -138,13 +138,17 @@ export async function recoverEmbeddedRunAttempt(input: {
   // latest real result. Only typed rate-limit continuation consumes that proof;
   // generic recovery retains the strict current-batch lifecycle gate above.
   const rateLimitBatchSettled =
-    transportBatchSettled || settledEvidence.settledWithLateSyntheticPriorResults;
+    transportBatchSettled ||
+    settledEvidence.settledWithLateSyntheticPriorResults ||
+    settledEvidence.settledWithTerminalizedToolResults;
   const rateLimitToolErrorSettled =
     !settledEvidence.hasUnsettledToolError ||
-    (settledEvidence.settledWithLateSyntheticPriorResults &&
+    ((settledEvidence.settledWithLateSyntheticPriorResults ||
+      settledEvidence.settledWithTerminalizedToolResults) &&
       Boolean(
         attempt.lastToolError &&
-        settledEvidence.lateSyntheticPriorFailureNames.has(attempt.lastToolError.toolName),
+        (settledEvidence.failedToolNames.has(attempt.lastToolError.toolName) ||
+          settledEvidence.lateSyntheticPriorFailureNames.has(attempt.lastToolError.toolName)),
       ));
   const settledRateLimitPromptFailure = Boolean(
     !currentAttemptReplaySafe &&
