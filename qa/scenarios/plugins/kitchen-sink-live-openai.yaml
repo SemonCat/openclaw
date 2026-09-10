@@ -215,10 +215,6 @@ flow:
                   diagnostics: [...(pluginList.diagnostics ?? []), ...(inspect.diagnostics ?? [])]
                     .filter((entry) => entry?.level === "error")
                     .map((entry) => String(entry.message ?? "")),
-                  unexpectedDiagnostics: [...new Set([...(pluginList.diagnostics ?? []), ...(inspect.diagnostics ?? [])]
-                    .filter((entry) => entry?.level === "error")
-                    .map((entry) => String(entry.message ?? ""))
-                    .filter((message) => !config.allowedAdversarialDiagnostics.includes(message)))],
                 };
               })()
         - assert:
@@ -254,9 +250,9 @@ flow:
             message:
               expr: "`External Kitchen Sink plugin unexpectedly registered bundled-only agent harness: ${JSON.stringify(inspectFacts.agentHarnessIds)}`"
         - assert:
-            expr: "inspectFacts.unexpectedDiagnostics.length === 0"
+            expr: "inspectFacts.diagnostics.length === 0"
             message:
-              expr: "`Kitchen Sink conformance personality emitted unexpected diagnostics: ${JSON.stringify(inspectFacts.unexpectedDiagnostics)}`"
+              expr: "`Kitchen Sink conformance personality emitted unexpected diagnostics: ${JSON.stringify(inspectFacts.diagnostics)}`"
       detailsExpr: inspectFacts
 
     - name: restarts gateway with Kitchen Sink configured
