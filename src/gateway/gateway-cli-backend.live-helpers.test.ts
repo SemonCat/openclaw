@@ -2,6 +2,7 @@
  * Tests live helper utilities for gateway CLI backend probes.
  */
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import { createDeferred } from "../../test/helpers/promise.js";
 import { testing as cliBackendsTesting } from "../agents/cli-backends.test-support.js";
 import type { SubagentRunRecord } from "../agents/subagents/registry/subagent-registry.types.js";
 import { captureEnv } from "../test-utils/env.js";
@@ -458,7 +459,7 @@ describe("live CLI announcement ordering oracle", () => {
   });
 
   it.each(historyCases)("$name", async ({ history, valid, delayProjection }) => {
-    const pendingParent = Promise.withResolvers<{ result: { payloads: { text: string }[] } }>();
+    const pendingParent = createDeferred<{ result: { payloads: { text: string }[] } }>();
     let parentText = "";
     let released = false;
     const barrier = {
