@@ -9,7 +9,7 @@ Docs: https://docs.openclaw.ai
 
 - **Recover from compatible failed updates:** retain the previous package and restore it with the previous configuration and service when schema and configuration checks prove rollback is safe; database migrations still require a verified pre-update backup. (#140339) Thanks @fuller-stack-dev.
 - **Plugins in one place:** discover bundled and ClawHub plugins, install them from the Control UI, and manage their setup, settings, and access in a unified Plugins workspace. (#135839, #135840, #139042, #137659, #137886, #138755, #142624, #142782) Thanks @Patrick-Erichsen.
-- **Prepared cloud sessions:** reuse completed project setup and maintain bounded ready-worker capacity for eligible Linux projects so later sessions can start without repeating setup. (#143227, #143372)
+- **Prepared cloud sessions:** start eligible Linux sessions from prepared local projects or public GitHub repositories, and build reusable snapshots from the Control UI before starting a conversation. (#143227, #143372, #143410, #143838, #143929)
 - **Answer questions in the terminal:** use keyboard-driven choices, free-text answers, and multi-question prompts in both Gateway-connected and local TUI sessions. (#143273)
 - **GPT Image 2.5:** select the new Flare and Sunburst variants for image generation and editing through OpenAI or fal without changing your existing default model. Related #143007. (#143068, #143069) Thanks @vincentkoc.
 - **More dependable conversation history:** recover final replies after interrupted streams, retain timeout notices after reload, and prevent duplicate final answers when live chat hands off to saved history. Related #141839. (#142168, #142135, #142422) Thanks @LiuwqGit, @obviyus, @chelsealong, @von8794, and @jalehman.
@@ -19,8 +19,8 @@ Docs: https://docs.openclaw.ai
 ### Changes
 
 - **Rollback and recovery:** eligible schema-neutral update failures restore the retained package, command shim, service, and pre-activation configuration, then verify the previous Gateway again. Changed database schemas, incompatible new databases, or intervening operator configuration edits block automatic rollback; a recovered update remains a failed update with a recorded rollback outcome. Use a [verified backup](https://docs.openclaw.ai/install/updating/rollback-and-recovery) before migration-bearing upgrades. (#140339) Thanks @fuller-stack-dev.
-- **Plugin organization:** browse installed plugins by category, keep their detail tabs together, and use short plugin-page URLs such as `/reports`. (#142710, #142711, #142712, #142713, #143183) Thanks @Patrick-Erichsen.
-- **Cloud ready workers:** eligible local Git projects prepare one unassigned worker per project/profile by default, with a Gateway-wide cap of four; repository-only sessions and paired devices are excluded. Ready workers incur provider running-machine charges until deleted. Set `cloudWorkers.profiles.<id>.readyWorkers` or `cloudWorkers.preparedPool.maxTotal` to zero to disable the corresponding reserves. See [warm images and ready workers](https://docs.openclaw.ai/gateway/cloud-workers/warm-images#ready-workers). (#143227, #143372)
+- **Plugin organization:** browse installed plugins by category, keep detail tabs together, use short plugin-page URLs such as `/reports`, and discover installed and ClawHub skills through one search. (#142710, #142711, #142712, #142713, #143183, #143758) Thanks @Patrick-Erichsen.
+- **Cloud ready workers:** eligible local Git projects and public GitHub repository sessions can reuse prepared workers without repeating setup; private repository-only sessions and paired devices remain outside this preparation flow. The default reserve target is one per project/profile, capped at four Gateway-wide. Ready workers incur provider running-machine charges until deleted. Set `cloudWorkers.profiles.<id>.readyWorkers` or `cloudWorkers.preparedPool.maxTotal` to zero to disable the corresponding reserves. See [warm images and ready workers](https://docs.openclaw.ai/gateway/cloud-workers/warm-images#ready-workers). (#143227, #143372, #143410)
 - **Terminal question controls:** navigate choices with arrows or numbers, type an Other answer, toggle multi-select choices, and reopen a pending prompt with `/question`; local-mode questions last only for the running TUI process. (#143273)
 - **Chat navigation and composition:** use a compact left-side conversation rail with sender identities in shared-chat previews, add selected text to the main composer, and preview attached videos before sending. Related #142207, #142592, #143473. (#142227, #143486, #142543, #142623) Thanks @vyctorbrzezowski and @Patrick-Erichsen.
 - **Skill learning:** open learning from past work in a normal session that you can inspect and continue. (#142909) Thanks @obviyus.
@@ -29,14 +29,18 @@ Docs: https://docs.openclaw.ai
 - **Read-only deployments:** honor host-owned `OPENCLAW_CONFIG_READONLY=1` across configuration writes, setup, Doctor repairs, plugin changes, and updates; read-only configuration commands continue to work, and this mode does not make runtime state read-only. Related #140706. (#140719) Thanks @sallyom.
 - **Upcoming SDK deprecation:** `agent-harness-credential-prompt-string-argument` entered deprecation on September 9, 2026; the legacy string argument to `buildCredentialSafetyPrompt` remains supported through November 30, 2026; plugin authors should pass `{ controlToolsAvailable }`. See [credential prompt migration](https://docs.openclaw.ai/plugins/sdk-migration/removed-surfaces#credential-prompt-builder). Related #128076. (#143238) Thanks @ejc3.
 - **SDK context compatibility:** `sdk-untrusted-context-identifier-aliases` reached its September 8, 2026 removal date but remains `removal-pending`; retain the deprecated untrusted-named context aliases while published plugin readers migrate to the channel-named replacements; removal remains pending migration verification and explicit breaking-release acceptance. See [plugin compatibility](https://docs.openclaw.ai/plugins/compatibility). (#142708)
+- **Cloud snapshot controls:** build, rebuild, inspect, pin, delete, and roll back supported cloud-worker snapshots from Settings → Connections → Cloud workers → Snapshots. Active builds can be canceled with confirmation; held or pinned images remain protected. Snapshot storage and ready-worker charges still apply. (#143814, #143838, #143893, #143929)
+- **Cloud placement and diagnostics:** edit advanced worker profiles and repository defaults, inspect cloud-session machine specifications, and select native Windows workers when the backend supports them. Warm images and desktops remain Linux-only. (#143801, #143864, #143769, #143798)
+- **Deepgram voice notes:** transcribe voice notes with `flux-general-en` or `flux-general-multi` through Deepgram Flux; these models require `ffmpeg`. See [Flux configuration](https://docs.openclaw.ai/providers/deepgram#flux-models). Related #129452. (#141836) Thanks @obviyus and @safzanpirani.
+- **Slow session diagnostics:** identify the work holding a session lifecycle queue and see which artifact-cleanup preparation stage is taking time. Related #143885, #143939. (#143886, #143942)
 
 ### Fixes
 
-- **Access and content boundaries:** preserve existing WhatsApp group allowlists during security repairs, continue blocking cloud-metadata addresses when private IPv6 exceptions are enabled, bound Slack HTTP request bodies before processing, and restrict Tlon citation retrieval to the cited post. (#142589, #137684, #136508, #142041) Thanks @eleqtrizit, @drobison00, and @pgondhi987.
-- **Workspace and backup safety:** preserve concurrent edits to agent workspace files and keep backup creation working when a live SQLite sidecar disappears after its database has already been snapshotted. Related #141042. (#135865, #141161) Thanks @yetval, @obviyus, @LiuwqGit, and @Cobblestone-Digital1.
-- **Migration recovery:** recover markerless multi-agent configurations, leave ambiguous Skill Workshop migrations available for review, explain hard-linked session migration refusals, and preserve normalized media when republishing migrated archives. Related #142582, #142585, #143094, #142584, #143593. (#143202, #143141, #143195, #143595) Thanks @GitHoubi, @fahrenhe1t, and @fuller-stack-dev.
-- **Doctor and authentication:** preserve source state during full lint, scope legacy auth-profile migration refusals to affected providers, recover legacy node tokens with invalid scopes, and prevent stale shared OAuth refresh generations from overwriting newer credentials. Related #143173, #143263. (#142839, #143310, #143599, #141477) Thanks @thien-ngn, @obviyus, @tskerpnext, @matthewmoroz, and @vincentkoc.
-- **Reply delivery and history:** recover final replies from terminated streams, keep timeout outcomes visible after reload, retain paragraph boundaries, and report truncated Responses replies as incomplete instead of complete. Preserve long transcript history across `sessions_yield` and avoid duplicate final replies during history hydration. Related #141839. (#142168, #142135, #140833, #142778, #137381, #142422) Thanks @LiuwqGit, @obviyus, @chelsealong, @von8794, @leapdragon, @zhangguiping-xydt, and @jalehman.
+- **Access and content boundaries:** preserve existing WhatsApp group allowlists during security repairs, continue blocking cloud-metadata addresses when private IPv6 exceptions are enabled, bound Slack HTTP request bodies, and restrict Tlon citation retrieval to the cited post. Reject stale signed Feishu webhook callbacks, prevent attachment reads from sibling agent sandboxes, and stop pipelined MCP calls after a rejected upload. Related #107972. (#142589, #137684, #136508, #142041, #143484, #143521, #143724) Thanks @eleqtrizit, @drobison00, @pgondhi987, and @yetval.
+- **Workspace and backup safety:** preserve concurrent workspace edits, include required external configuration files in full backups, keep private update captures out of ordinary exports even after they move, and tolerate a disappearing live SQLite sidecar after its database is snapshotted. Related #141042, #143678. (#135865, #141161, #143693, #143799, #143899) Thanks @yetval, @obviyus, @LiuwqGit, @Cobblestone-Digital1, and @fuller-stack-dev.
+- **Migration recovery:** recover markerless multi-agent configurations, leave ambiguous Skill Workshop migrations available for review, explain hard-linked session migration refusals, and preserve normalized media when republishing migrated archives. Retain legacy Codex assistant messages during session SQLite import and repair the dangling Workshop review index. Related #142582, #142585, #143094, #142584, #143593, #140100. (#143202, #143141, #143195, #143595, #140296, #142522) Thanks @GitHoubi, @fahrenhe1t, @fuller-stack-dev, @ylcn91, @ikenraf, @jjjhenriksen, @RomneyDa, and @pash-openai.
+- **Doctor and authentication:** preserve source state during full lint, keep saved authentication profiles aligned during migration, scope legacy auth-profile refusals to affected providers, recover legacy node tokens with invalid scopes, and prevent stale shared OAuth refresh generations from overwriting newer credentials. Restore Zalo User policy promotion and stop Moonshot China setup from repeatedly reinstalling its provider. Related #143173, #143263, #143865, #143630. (#142839, #143310, #143599, #141477, #143429, #143860, #143742) Thanks @thien-ngn, @obviyus, @tskerpnext, @matthewmoroz, @vincentkoc, @wangmiao0668000666, and @zwyhmcn.
+- **Reply delivery and history:** recover final replies from terminated streams and earlier tool errors, retain partial failed-turn text and timeout outcomes, preserve paragraph and code-block boundaries, and report truncated Responses replies as incomplete. Preserve long transcript history across `sessions_yield`, avoid duplicate final replies during history hydration and duplicate user turns after Claude CLI resume, and retain final ChatGPT Responses frames at stream end. Related #141839, #132762, #143641. (#142168, #142135, #140833, #142778, #137381, #142422, #143598, #125977, #143722, #143960, #120902) Thanks @LiuwqGit, @obviyus, @chelsealong, @von8794, @leapdragon, @zhangguiping-xydt, @jalehman, @harjothkhara, @CK-XYZ, @ayaangazali, @rgregg, @Marvinthebored, @Peetiegonzalez, and @zenglingbiao.
 - **Chat continuity:** keep submitted images visible during history handoff, prevent cold-session switching flashes, and reconcile concurrent session updates consistently. (#143407, #134868, #143049) Thanks @jesse-merhi.
 - **Voice conversations:** deliver yielded and repeatedly delegated results, permit independent voice consultations from model-locked requester sessions, and truncate interrupted realtime audio at the amount actually played. Related #142483, #138592. (#129535, #142830, #142736, #138619) Thanks @vincentkoc, @RileyJJY, @jai-assistant, @LiuwqGit, @obviyus, and @fabiolr.
 - **Telegram:** retain replies when an HTTP proxy rejects its tunnel, recognize bot-ID mentions in text and photo captions, preserve code-example spacing, and stop late stall reactions after preparation is canceled. Related #140265, #141078. (#140388, #140266, #142504, #141079) Thanks @Hekzory, @obviyus, @cai-ops, and @ooiuuii.
@@ -46,24 +50,31 @@ Docs: https://docs.openclaw.ai
 - **Channel text fidelity:** preserve unknown Matrix message text and escaped mentions, decode HTML-only Teams messages correctly, retain Feishu rich-text styles and unrelated tools, and keep outbound WhatsApp response prefixes out of inbound messages. Related #140971, #138779. (#135359, #142369, #142496, #142627, #141984, #138819) Thanks @teddytennant, @obviyus, @SunnyShu0925, @hayden-cc, @sunlit-deng, @vincentkoc, and @Jackten.
 - **Android chat and folding screens:** wait for picked attachments before sending their captions, restore completed tool activity, distinguish connection state from chat readiness, and keep thinking controls, background tasks, and the branch picker inside their fold panes. Related #142805. (#143162, #142810, #143128, #141860, #141899, #142418) Thanks @ansxor, @IWhatsskill, and @vincentkoc.
 - **Mobile connection feedback:** show failures and recovery for unreachable Gateways and report battery fractions as the intended percentage. Related #141066. (#142651, #141069) Thanks @vincentkoc, @NullArbitrage, and @obviyus.
-- **Provider and model selection:** preserve authored model catalog rows during refresh, retain Arcee rows and selected credentials, show the correct inherited model and thinking profile across session views, and hide unsupported thinking or Fast choices. Keep multi-agent session lists working after model fallback. (#142302, #142898, #142751, #142790, #142646, #142682, #143337) Thanks @obviyus.
+- **Provider and model selection:** preserve authored catalog rows, exact model identities, metadata, and credentials when aliases coexist or catalogs refresh. Keep model overrides, context limits, thinking choices, vision, compaction, and tool inventories tied to the selected model and provider; hide unsupported thinking or Fast choices and preserve session lists after fallback. (#142302, #142898, #142751, #142790, #142646, #142682, #143337, #143643, #143686, #143708, #143777, #143780, #143822, #143848, #143872, #143954, #143967, #143975, #143994, #143999, #144009, #144010, #144034, #144060, #144107, #142822) Thanks @obviyus.
 - **Provider requests:** preserve Anthropic prompt-cache reuse across transient runtime context, treat Kimi quota exhaustion as a rate limit rather than an authentication failure, preserve managed Responses session affinity, and recover supported malformed streamed tool arguments and silent tool rejections. Related #140607, #142524, #140918, #135111. (#140621, #142656, #141107, #141323, #142176) Thanks @LightningWareLLC, @RileyJJY, @obviyus, @rico007, @louisfy, @alexph-dev, @lraesly, and @1Vision365-PeterTijsma.
-- **Memory:** use the selected fallback provider's embedding model and index status, observe external LanceDB writes during recall, continue recall when trigger lookup times out, preserve first-run setup after empty dreaming, and bound pre-compaction flush context while recording when no memory-write tool exists. Related #137805, #142479, #141787, #143188. (#142364, #142609, #137806, #142567, #141808, #143193, #127031) Thanks @Yigtwxx, @obviyus, @azuretek, @ylcn91, @BsnizND, @SunnyShu0925, @dh-js, @KirDE, and @ayaangazali.
-- **Update handoff and restart:** keep older updaters and Git installs upgrading from 2026.9.1 able to restart the Gateway, preserve handoff across pnpm generations, replace unsupported service Node runtimes, retain restored-version verification, and prevent systemd restart hangs. Related #143204, #140821. (#142195, #142631, #143137, #143159, #142817, #140914) Thanks @jason-allen-oneal, @wangmiao0668000666, @NianJiuZst, @obviyus, and @rboy1.
+- **Memory:** use the selected fallback provider’s embedding model and index status, observe external LanceDB writes, and retain recall through trigger timeouts. Keep top search results stable as result limits change, give managed local embedding startup its own readiness budget, honor bounded provider cooldowns, require real query diversity for promotion, and skip unnecessary recall for inter-session deliveries. Preserve first-run setup after empty dreaming and bound pre-compaction flush context while recording when no memory-write tool exists. Related #137805, #142479, #141787, #143188, #134604, #143169, #108893, #143821. (#142364, #142609, #137806, #142567, #141808, #143193, #127031, #136984, #143590, #134959, #119624, #143903) Thanks @Yigtwxx, @obviyus, @azuretek, @ylcn91, @BsnizND, @SunnyShu0925, @dh-js, @KirDE, @ayaangazali, @linhongyu510, @scottcha, @wangmiao0668000666, @PeterHodl, @shojikumaru, @developercrocodiles, @pcpilot-dev, @LiuwqGit, and @kiagentkronos-cell.
+- **Update handoff and restart:** keep older updaters and Git installs upgrading from 2026.9.1 able to restart the Gateway; accept shipped 2026.9.2/2026.9.3 service handoffs without weakening current service-owner checks. Preserve pnpm-generation handoff and schema-upgrade restart intent, prepare managed helper schemas before readiness, replace unsupported service Node runtimes, retain restored-version verification, and prevent systemd restart hangs. Related #143204, #140821, #143543. (#142195, #142631, #143137, #143159, #142817, #140914, #143859, #143738, #144031) Thanks @jason-allen-oneal, @wangmiao0668000666, @NianJiuZst, @obviyus, @rboy1, @RomneyDa, and @IWhatsskill.
 - **Plugin updates:** converge the plugin cohort when core is already current without turning unchanged installations into needless updates, retain bundled aliases during rehearsal, avoid false Memory Core migration refusals, and explain retained official plugin pins. (#143174, #143462, #143190, #143138, #142457) Thanks @RomneyDa, @PollyBot13, and @obviyus.
-- **Update recovery feedback:** allow long Doctor finalization to finish, retain useful diagnostics when update history is unavailable, and require confirmation before automatic triage launches a coding agent. (#143321, #143557, #143139) Thanks @fuller-stack-dev.
-- **Gateway responsiveness:** move cold history planning, integrity checks, and archive pruning off the main thread, keep prepared updates and post-eviction maintenance responsive, and reduce memory spikes when inspecting long sessions. (#143332, #143226, #143379, #143434, #143602, #143175)
+- **Update recovery feedback:** allow long Doctor finalization to finish, clear orphaned update runs instead of showing permanent progress, retain cleanup outcomes and recoverable warnings, and avoid linking unavailable reports. Preserve diagnostics when history is unavailable and require confirmation before automatic triage launches a coding agent; verified rollback follow-up actions remain opt-in. Related #139714. (#143321, #143557, #143139, #143774, #143767, #143844, #143921, #143965, #143748, #143657) Thanks @fuller-stack-dev and @Colton-Harris.
+- **Gateway responsiveness:** move cold history planning, integrity checks, and archive pruning off the main thread; keep prepared updates and post-eviction maintenance responsive; reduce memory spikes when inspecting long sessions. Reduce unused plugin and model catalog preparation, bound parallel remote workspace hashing, avoid unnecessary diagnostic copies, and keep automation delivery previews responsive. (#143332, #143226, #143379, #143434, #143602, #143175, #143783, #143846, #144095, #144017, #144109, #144014)
 - **Session retention:** stop excess cleanup once disk pressure clears, preserve history that becomes protected during cleanup, and avoid premature daily resets around daylight-saving gaps. (#143285, #142505, #142482)
 - **Browser actions:** keep existing browser sessions from timing out prematurely, preserve newer pending dialogs when older actions settle, report blocked or interrupted CLI actions, and leave browser focus intact during passive following. (#143365, #142608, #142480, #134480) Thanks @scotthuang and @obviyus.
 - **Settings and sign-in:** preserve settings drafts after deleting array rows, make agent automations editable from Settings, and request the Gateway token when a remembered device token is stale. Related #139781. (#142564, #139782, #143156) Thanks @jjjhenriksen and @vyctorbrzezowski.
-- **Plugin and skill installation:** prevent installed-plugin matches across different ClawHub registries, report newer releases for pinned installs, recover from capability-consent dead ends, retain bundled trust for development-path installs, and avoid cutting off skill installation after two minutes. Related #137624, #143111. (#143644, #137892, #143125, #143516, #143000) Thanks @pfrederiksen, @vincentkoc, @LiuwqGit, @obviyus, @yxloveql, @RomneyDa, and @gozu.
-- **Paired devices and Linux:** expose paired-computer actions on the first tool call, honor SSH alias ports, preserve remote credential references on reconnect, and keep background-update results actionable. Related #121934. (#141277, #142900, #142907, #121938) Thanks @oywino, @obviyus, and @vincentkoc.
+- **Plugin and skill installation:** prevent installed-plugin matches across different ClawHub registries, report newer releases for pinned installs, recover capability-consent dead ends, and retain bundled trust for development-path installs. Preserve plugin selection and restart progress, rank official catalog results consistently, refresh skill snapshots on Gateway restart, and avoid cutting off skill installation after two minutes. Related #137624, #143111, #122107. (#143644, #137892, #143125, #143516, #143000, #143671, #143730, #143731, #122110) Thanks @pfrederiksen, @vincentkoc, @LiuwqGit, @obviyus, @yxloveql, @RomneyDa, @gozu, @Patrick-Erichsen, and @sappkevin.
+- **Paired devices and Linux:** expose window discovery on the first computer action, preserve activation and observation results, open chat desktops on their assigned machines, and identify who took desktop control. Honor SSH alias ports, retain remote credential references on reconnect, and keep background-update results actionable. Related #121934. (#141277, #142900, #142907, #121938, #143736, #143953, #143831, #143828) Thanks @oywino, @obviyus, and @vincentkoc.
+- **Doctor update finalization:** allow implicit Codex preferences when the plugin is absent while retaining errors for explicitly required runtimes; finish configuration-less updates without creating a configuration file; close only Doctor’s private snapshot database before cleanup, leaving the source database open. Related #143786, #143797, #138260. Thanks @osipovia.
+- **Delegation and reset:** keep background completion wakes alive after a foreground reply, preserve subagent history when a parent thread changes, show full subagent transcripts in the task sidebar, and keep session resets responsive while stopping yielded child work. Canceled automations release their pending result waits. Related #143389. (#143866, #143869, #143747, #143916, #143832) Thanks @obviyus, @aleps001, and @pash-openai.
+- **Provider routing and search:** preserve stable routing identities for standalone OpenCode and OpenCode Go turns, retain provider turn headers for explicit sessions, preserve local-model request prefixes, and keep Gemini web search available with new API keys. Global web-search disable remains effective in session controls. Related #137257, #96974, #121401. (#143659, #143558, #143890, #137371, #111964, #121557) Thanks @HAPPYFAPTAIN, @obviyus, @RomneyDa, @vincentkoc, @gwiltschek, @dillona, @anguslogan01, @zyw02, and @cursoragent.
+- **Update ownership and cloud continuity:** stop plugin persistence and rollback actions after updater authority is lost, reject unverified Gateway replacements, preserve cloud machines across Gateway updates, and continue submitted turns across worker-runtime updates. Related #143750, #143841. (#144130, #143791, #143863, #143858, #143910) Thanks @fuller-stack-dev and @vincentkoc.
+- **Runtime and state diagnostics:** re-execute the CLI under an available supported Node runtime before refusing to start, preserve the selected Bun SQLite library in managed services, retain macOS launchd error logs, restore Linux Bun CPU diagnostics, and tolerate transient locks during read-only state access. Schema-drift failures name the repair path. Related #90711, #143800. (#143464, #143651, #142186, #143519, #143805, #143908, #143531) Thanks @RomneyDa, @Enominera, and @pash-openai.
+- **Control UI recovery:** restore Send when Stop finds an already-finished run, retain terminal sessions after interrupted restoration, report failed Review file opens, stop stale task reads after Review changes, and keep session files and embedded reports from being squeezed into nested scrolling regions. Related #143356, #143971. (#143437, #144015, #143958, #144073, #143854, #143765) Thanks @ylcn91, @obviyus, @YanHE1169, @vincentkoc, @Marvinthebored, and @Peetiegonzalez.
+- **Tool and export fidelity:** preserve flat tool arguments beside empty search wrappers, keep native image-generation hooks available, retain paginated read evidence in trajectory exports, and report the actual filesystem error when workspace writes fail. Related #143830, #115920. (#143729, #143717, #143930, #116378) Thanks @xydigitLybnnnn, @obviyus, @linhongyu510, @cp1369, @sloptop-the-terrible, and @609NFT.
 
 ### Complete contribution record
 
-This audited record covers the complete 58fcf69cadd0be59ecee41b21b655f195ccda7b2..298493fa54b8d2f9091e504c178f850591a1757c history: 842 in-range PRs + 0 retained seed-only PRs = 842 unique PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
+This audited record covers the complete 58fcf69cadd0be59ecee41b21b655f195ccda7b2..2a4d6a10ae6013ece39ae581762daf13b84ff1c9 history: 1,173 in-range PRs + 0 retained seed-only PRs = 1,173 unique PRs. The generation manifest also supplies direct commits as editorial input; the grouped notes above prioritize user impact.
 
-Shipped baseline exclusions: v2026.9.3 (14 PRs: #120728, #131475, #134290, #134400, #135043, #139089, #139196, #139393, #139722, #140263, #140274, #140672, #140803, #141055).
+Shipped baseline exclusions: v2026.9.3 (19 PRs: #111451, #120728, #121140, #129636, #131475, #132740, #133652, #134290, #134400, #135043, #139089, #139196, #139393, #139722, #140263, #140274, #140672, #140803, #141055).
 
 #### Pull requests
 
@@ -571,6 +582,7 @@ Shipped baseline exclusions: v2026.9.3 (14 PRs: #120728, #131475, #134290, #1344
 - **PR #143129** Thanks @vincentkoc.
 - **PR #143108**
 - **PR #141756** Thanks @chelsealong and @obviyus.
+- **PR #136277** Thanks @yetval and @obviyus.
 - **PR #142631** Thanks @jason-allen-oneal.
 - **PR #143112**
 - **PR #143133**
@@ -909,6 +921,336 @@ Shipped baseline exclusions: v2026.9.3 (14 PRs: #120728, #131475, #134290, #1344
 - **PR #138619** Related #138592. Thanks @LiuwqGit and @obviyus and @fabiolr.
 - **PR #143652**
 - **PR #143655**
+- **PR #143429** Thanks @obviyus.
+- **PR #125977** Thanks @ayaangazali and @obviyus.
+- **PR #143653**
+- **PR #143598** Related #132762. Thanks @harjothkhara and @obviyus and @CK-XYZ.
+- **PR #143660**
+- **PR #141836** Related #129452. Thanks @obviyus and @safzanpirani.
+- **PR #143663**
+- **PR #143651**
+- **PR #142186**
+- **PR #143657** Thanks @fuller-stack-dev.
+- **PR #143662**
+- **PR #143376** Thanks @vincentkoc.
+- **PR #143680**
+- **PR #143667** Related #143654.
+- **PR #143666**
+- **PR #92288** Thanks @ai-hpc and @obviyus.
+- **PR #143690**
+- **PR #137303** Thanks @qingminglong and @obviyus.
+- **PR #143684**
+- **PR #136466** Related #136392. Thanks @vincentkoc.
+- **PR #143697**
+- **PR #143676** Thanks @shakkernerd.
+- **PR #143698**
+- **PR #143705**
+- **PR #142522** Thanks @jjjhenriksen and @RomneyDa and @pash-openai.
+- **PR #143687**
+- **PR #143658**
+- **PR #143709** Thanks @vincentkoc.
+- **PR #143710**
+- **PR #143706**
+- **PR #143682** Related #143656. Thanks @vincentkoc.
+- **PR #143674**
+- **PR #143622**
+- **PR #143675**
+- **PR #143723**
+- **PR #143506** Related #143385. Thanks @sunlit-deng and @obviyus and @dbarbatti.
+- **PR #143720**
+- **PR #143721**
+- **PR #143695**
+- **PR #143531** Thanks @RomneyDa.
+- **PR #143567** Thanks @RomneyDa.
+- **PR #143590** Related #143169. Thanks @wangmiao0668000666 and @obviyus and @PeterHodl.
+- **PR #119624** Thanks @pcpilot-dev.
+- **PR #143519** Related #90711. Thanks @RomneyDa and @Enominera.
+- **PR #109092** Thanks @Pick-cat and @obviyus.
+- **PR #143724**
+- **PR #143726**
+- **PR #143643** Thanks @obviyus.
+- **PR #143708**
+- **PR #143722** Related #143641. Thanks @obviyus and @rgregg.
+- **PR #143734**
+- **PR #143725**
+- **PR #143671**
+- **PR #143741**
+- **PR #143749**
+- **PR #143736**
+- **PR #143693** Related #143678. Thanks @fuller-stack-dev.
+- **PR #143737**
+- **PR #143716**
+- **PR #143746**
+- **PR #143681**
+- **PR #143699**
+- **PR #143712**
+- **PR #143748**
+- **PR #143742** Related #143630. Thanks @zwyhmcn.
+- **PR #143715**
+- **PR #143763**
+- **PR #143686**
+- **PR #143773** Thanks @vincentkoc.
+- **PR #143765**
+- **PR #143762**
+- **PR #143669**
+- **PR #143775** Thanks @vincentkoc.
+- **PR #143717**
+- **PR #137147** Thanks @qingminglong and @obviyus.
+- **PR #143766**
+- **PR #143770** Thanks @vincentkoc.
+- **PR #116378** Related #115920. Thanks @sloptop-the-terrible and @obviyus and @609NFT.
+- **PR #143738** Related #143543. Thanks @RomneyDa.
+- **PR #143704** Thanks @RomneyDa.
+- **PR #143751** Thanks @RomneyDa.
+- **PR #143729** Thanks @xydigitLybnnnn and @obviyus.
+- **PR #143758** Thanks @Patrick-Erichsen.
+- **PR #143760**
+- **PR #143769**
+- **PR #143747**
+- **PR #143696** Thanks @RomneyDa.
+- **PR #143692** Thanks @RomneyDa.
+- **PR #143689** Thanks @RomneyDa.
+- **PR #143582** Thanks @RomneyDa.
+- **PR #143576** Thanks @RomneyDa.
+- **PR #143474** Thanks @RomneyDa.
+- **PR #143570** Thanks @RomneyDa.
+- **PR #143793**
+- **PR #125413**
+- **PR #143782**
+- **PR #143783**
+- **PR #143780**
+- **PR #143754**
+- **PR #122110** Related #122107. Thanks @sappkevin and @obviyus.
+- **PR #143558** Thanks @RomneyDa.
+- **PR #143795**
+- **PR #143796** Thanks @vincentkoc.
+- **PR #143805** Related #143800.
+- **PR #143815**
+- **PR #143807**
+- **PR #120902** Thanks @zenglingbiao and @obviyus.
+- **PR #143798**
+- **PR #143659** Thanks @HAPPYFAPTAIN and @obviyus.
+- **PR #143730** Thanks @Patrick-Erichsen.
+- **PR #143731** Thanks @Patrick-Erichsen.
+- **PR #143801**
+- **PR #121557** Related #121401. Thanks @zyw02 and @cursoragent and @obviyus.
+- **PR #143808**
+- **PR #143828**
+- **PR #143806**
+- **PR #143845** Thanks @vincentkoc.
+- **PR #143855** Thanks @vincentkoc.
+- **PR #143844** Thanks @fuller-stack-dev.
+- **PR #143856** Thanks @vincentkoc.
+- **PR #143835** Thanks @fuller-stack-dev.
+- **PR #143824**
+- **PR #143776**
+- **PR #143846**
+- **PR #143813**
+- **PR #143862**
+- **PR #143789**
+- **PR #143867** Thanks @vincentkoc.
+- **PR #143464**
+- **PR #143816**
+- **PR #143859**
+- **PR #143831**
+- **PR #143664** Thanks @obviyus.
+- **PR #143848**
+- **PR #143799** Thanks @fuller-stack-dev.
+- **PR #143868**
+- **PR #143863** Related #143841. Thanks @fuller-stack-dev.
+- **PR #143791** Related #143750. Thanks @vincentkoc and @fuller-stack-dev.
+- **PR #143877** Thanks @fuller-stack-dev.
+- **PR #143812**
+- **PR #143875**
+- **PR #143849**
+- **PR #143850**
+- **PR #143857** Thanks @vincentkoc.
+- **PR #143853** Thanks @vincentkoc.
+- **PR #143870** Thanks @vincentkoc.
+- **PR #143871**
+- **PR #143869**
+- **PR #137371** Related #137257. Thanks @gwiltschek and @obviyus.
+- **PR #143814**
+- **PR #143811** Thanks @RomneyDa.
+- **PR #143573** Thanks @RomneyDa.
+- **PR #143810** Thanks @RomneyDa.
+- **PR #143768**
+- **PR #143553** Thanks @RomneyDa.
+- **PR #143552** Thanks @RomneyDa.
+- **PR #143551** Thanks @RomneyDa.
+- **PR #143572** Thanks @RomneyDa.
+- **PR #143565** Thanks @RomneyDa.
+- **PR #143562** Thanks @RomneyDa.
+- **PR #143564** Thanks @RomneyDa.
+- **PR #143874**
+- **PR #143785** Thanks @obviyus.
+- **PR #143767**
+- **PR #143889**
+- **PR #143838**
+- **PR #136984** Related #134604. Thanks @linhongyu510 and @obviyus and @scottcha.
+- **PR #143533** Thanks @RomneyDa.
+- **PR #143534** Thanks @RomneyDa.
+- **PR #143536** Thanks @RomneyDa.
+- **PR #143535** Thanks @RomneyDa.
+- **PR #143914**
+- **PR #143861**
+- **PR #143887**
+- **PR #143554** Thanks @RomneyDa.
+- **PR #143854**
+- **PR #143858**
+- **PR #137422** Thanks @qingminglong and @obviyus.
+- **PR #143913**
+- **PR #143895** Thanks @vincentkoc.
+- **PR #143563** Thanks @RomneyDa.
+- **PR #138160** Thanks @SunnyShu0925 and @obviyus.
+- **PR #143919**
+- **PR #143866**
+- **PR #143886** Related #143885.
+- **PR #134959** Related #108893. Thanks @shojikumaru and @obviyus and @developercrocodiles.
+- **PR #143916** Related #143389. Thanks @obviyus and @aleps001.
+- **PR #143851**
+- **PR #111964** Related #96974. Thanks @dillona and @vincentkoc and @anguslogan01.
+- **PR #143912**
+- **PR #143901**
+- **PR #142132** Thanks @mgabor3141 and @obviyus.
+- **PR #143904** Thanks @vincentkoc.
+- **PR #143926** Thanks @vincentkoc.
+- **PR #143873** Thanks @vincentkoc.
+- **PR #143872**
+- **PR #143925**
+- **PR #139071** Thanks @qingminglong and @obviyus.
+- **PR #143777**
+- **PR #143893**
+- **PR #143923** Thanks @vincentkoc.
+- **PR #143792**
+- **PR #143774** Related #139714. Thanks @Colton-Harris.
+- **PR #143927** Thanks @vincentkoc.
+- **PR #143945**
+- **PR #143928**
+- **PR #143864**
+- **PR #143899** Thanks @fuller-stack-dev.
+- **PR #143931** Thanks @vincentkoc.
+- **PR #143922**
+- **PR #143942** Related #143939.
+- **PR #141762** Thanks @xiaoguomeiyitian and @obviyus.
+- **PR #143950** Thanks @vincentkoc.
+- **PR #143920**
+- **PR #143822**
+- **PR #143954**
+- **PR #135539** Thanks @kvnloo and @obviyus.
+- **PR #143962** Thanks @vincentkoc.
+- **PR #143910**
+- **PR #143949** Related #143947.
+- **PR #143964**
+- **PR #143921** Thanks @fuller-stack-dev.
+- **PR #143965**
+- **PR #143974**
+- **PR #143977** Thanks @vincentkoc.
+- **PR #143979** Thanks @vincentkoc.
+- **PR #143759** Related #143756.
+- **PR #143969**
+- **PR #143982** Thanks @vincentkoc.
+- **PR #141283** Thanks @north-echo and @obviyus.
+- **PR #143978**
+- **PR #143924**
+- **PR #143888**
+- **PR #143967**
+- **PR #111706** Thanks @xydt-tanshanshan and @obviyus.
+- **PR #143803**
+- **PR #143975**
+- **PR #143908** Thanks @pash-openai.
+- **PR #143832** Thanks @pash-openai.
+- **PR #143953**
+- **PR #139562** Thanks @TheCrazyLex and @obviyus.
+- **PR #140296** Related #140100. Thanks @ylcn91 and @ikenraf.
+- **PR #143983** Thanks @vincentkoc.
+- **PR #143410**
+- **PR #144004**
+- **PR #143996** Thanks @vincentkoc.
+- **PR #143997**
+- **PR #144018** Thanks @vincentkoc.
+- **PR #144002**
+- **PR #144021** Thanks @vincentkoc.
+- **PR #144030** Thanks @vincentkoc.
+- **PR #144028** Thanks @vincentkoc.
+- **PR #144033**
+- **PR #144039** Thanks @vincentkoc.
+- **PR #143958** Related #143971. Thanks @Marvinthebored and @Peetiegonzalez and @obviyus.
+- **PR #144037** Thanks @RomneyDa.
+- **PR #144051** Thanks @vincentkoc.
+- **PR #144049**
+- **PR #144050**
+- **PR #142822** Thanks @obviyus.
+- **PR #144058**
+- **PR #144032** Thanks @vincentkoc.
+- **PR #144067**
+- **PR #143929**
+- **PR #144017**
+- **PR #144007**
+- **PR #144060**
+- **PR #144014**
+- **PR #144010**
+- **PR #144012**
+- **PR #144029** Thanks @vincentkoc.
+- **PR #143930** Related #143830. Thanks @linhongyu510 and @obviyus and @cp1369.
+- **PR #144009**
+- **PR #144072** Thanks @vincentkoc.
+- **PR #144036**
+- **PR #143993**
+- **PR #143772**
+- **PR #144076**
+- **PR #144038** Related #144035.
+- **PR #144083** Thanks @vincentkoc.
+- **PR #144080**
+- **PR #144073**
+- **PR #144087**
+- **PR #144034**
+- **PR #144022**
+- **PR #144015** Thanks @vincentkoc.
+- **PR #144054**
+- **PR #141071** Related #141000. Thanks @ooiuuii and @obviyus.
+- **PR #144011**
+- **PR #144092**
+- **PR #144091** Thanks @vincentkoc.
+- **PR #143903** Related #143821. Thanks @LiuwqGit and @obviyus and @kiagentkronos-cell.
+- **PR #144075**
+- **PR #143994**
+- **PR #143521** Related #107972. Thanks @eleqtrizit and @yetval.
+- **PR #144090**
+- **PR #144089** Thanks @vincentkoc.
+- **PR #144086** Thanks @vincentkoc.
+- **PR #144024**
+- **PR #144077**
+- **PR #144096**
+- **PR #143999**
+- **PR #144095**
+- **PR #143484** Thanks @eleqtrizit.
+- **PR #144097**
+- **PR #143437** Related #143356. Thanks @ylcn91 and @obviyus and @YanHE1169.
+- **PR #144023** Thanks @vincentkoc.
+- **PR #144108**
+- **PR #144085** Thanks @vincentkoc.
+- **PR #144105** Thanks @vincentkoc.
+- **PR #143960** Thanks @Marvinthebored and @Peetiegonzalez and @obviyus.
+- **PR #144116**
+- **PR #144109**
+- **PR #144031** Thanks @IWhatsskill.
+- **PR #144107**
+- **PR #144117**
+- **PR #144115** Related #144114.
+- **PR #144110**
+- **PR #144122**
+- **PR #144120**
+- **PR #144126** Thanks @vincentkoc.
+- **PR #144088**
+- **PR #144130** Thanks @fuller-stack-dev.
+- **PR #144129** Related #144123. Thanks @vincentkoc.
+- **PR #143890** Thanks @vincentkoc.
+- **PR #143311** Thanks @vincentkoc.
+- **PR #143745** Related #143743. Thanks @vincentkoc.
+- **PR #144135**
+- **PR #143860** Related #143865. Thanks @wangmiao0668000666 and @obviyus.
+- **PR #144121**
 ## 2026.9.3
 
 ### Highlights
