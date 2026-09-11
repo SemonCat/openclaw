@@ -195,7 +195,7 @@ describe("native slash channel model routing", () => {
     const resetEntry = loadExactSessionEntry({ sessionKey, storePath })?.entry;
     expect(resetEntry?.providerOverride).toBeUndefined();
     expect(resetEntry?.modelOverride).toBeUndefined();
-    expect(resetEntry?.modelOverrideSource).toBeUndefined();
+    expect(resetEntry?.modelOverrideSource).toBe("default");
   });
 
   const statusSelectionCases: NativeStatusSelectionCase[] = [

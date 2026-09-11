@@ -638,7 +638,7 @@ describe("applySessionModelSelection", () => {
 
     expect(sessionEntry.providerOverride).toBeUndefined();
     expect(sessionEntry.modelOverride).toBeUndefined();
-    expect(sessionEntry.modelOverrideSource).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBe("default");
   });
 
   it("does not persist an explicit selection of the effective session default", async () => {
