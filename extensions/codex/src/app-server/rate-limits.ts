@@ -19,6 +19,10 @@ import {
 } from "openclaw/plugin-sdk/string-coerce-runtime";
 import { z } from "zod";
 import { isJsonObject, type JsonObject, type JsonValue } from "./protocol.js";
+import {
+  CODEX_USAGE_LIMIT_MESSAGE_PREFIX,
+  extractCodexResetHint,
+} from "./usage-limit-reset-hint.js";
 
 const CODEX_LIMIT_ID = "codex";
 const LIMIT_WINDOW_KEYS = ["primary", "secondary"] as const;
@@ -29,7 +33,6 @@ const ONE_DAY_MS = 24 * ONE_HOUR_MS;
 const DAY_WINDOW_MINUTES = 24 * 60;
 const WEEKLY_WINDOW_MINUTES = 7 * DAY_WINDOW_MINUTES;
 const WEEKLY_RESET_GAP_MS = 3 * ONE_DAY_MS;
-const CODEX_USAGE_LIMIT_MESSAGE_PREFIX = "You've reached your Codex subscription usage limit.";
 const CODEX_USAGE_LIMIT_STATE_MISMATCH_MESSAGE =
   "Codex rejected the request with a usage-limit error, but its current account usage does not report an exhausted limit.";
 
@@ -778,33 +781,6 @@ function formatResetDuration(resetsAtMs: number, nowMs: number): string {
 
 function formatWindowSignature(window: RateLimitSnapshot["primary"]): string {
   return window ? `${window.usedPercent ?? ""}:${window.resetsAt ?? ""}` : "";
-}
-
-function extractCodexResetHint(
-  message: string | undefined,
-  allowEnrichedHint: boolean,
-): [text: string, recoveryAction: string] | undefined {
-  if (!message) {
-    return undefined;
-  }
-  if (allowEnrichedHint && message.startsWith(CODEX_USAGE_LIMIT_MESSAGE_PREFIX)) {
-    // Re-entrant formatting preserves only the grammar emitted by formatResetTime.
-    const nextReset =
-      /^ Next reset (in\s+\d+\s+(?:seconds?|minutes?|hours?|days?),\s+[A-Z][a-z]{2}\s+\d{1,2}(?:,\s+\d{4})?\s+at\s+\d{1,2}:\d{2}\s+[AP]M\s+\S{1,16})\.(?:\s|$)/u.exec(
-        message.slice(CODEX_USAGE_LIMIT_MESSAGE_PREFIX.length),
-      );
-    if (nextReset?.[1]) {
-      return [`Next reset ${nextReset[1].trim()}`, "Wait until the reset time"];
-    }
-  }
-  const tryAgainAt = /\btry again\s+(at\s+[^.!?\n]+)(?:[.!?]|$)/iu.exec(message);
-  const tryAgainRelative = /\btry again\s+((?:tomorrow|in\s+[^.!?\n]+)[^.!?\n]*)(?:[.!?]|$)/iu.exec(
-    message,
-  );
-  const retryHint = tryAgainAt?.[1]?.trim() || tryAgainRelative?.[1]?.trim();
-  return retryHint
-    ? [`Codex says to try again ${retryHint}`, "Wait until the retry time"]
-    : undefined;
 }
 
 /* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

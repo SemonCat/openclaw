@@ -7,6 +7,17 @@ export type AgentFallbackRuntimeState = {
   continueFromSettledTranscript?: boolean;
 };
 
+/** Arms transcript continuation for every remaining model in the fallback chain. */
+export function createSettledTranscriptFallbackCallback(
+  state: AgentFallbackRuntimeState | undefined,
+): (() => void) | undefined {
+  return state
+    ? () => {
+        state.continueFromSettledTranscript = true;
+      }
+    : undefined;
+}
+
 /** Parameters for merging and persisting a session entry update. */
 type PersistSessionEntryParams = {
   sessionStore: Record<string, SessionEntry>;

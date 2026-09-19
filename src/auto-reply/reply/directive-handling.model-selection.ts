@@ -4,7 +4,9 @@ import type { ModelAliasIndex } from "../../agents/model-selection.js";
 import type { ModelVisibilityPolicy } from "../../agents/model-visibility-policy.js";
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { readSessionInputProfileId } from "../../sessions/session-participant-input.js";
 import { resolveProfileOverride } from "./directive-handling.auth-profile.js";
+import type { HandleDirectiveOnlyParams } from "./directive-handling.params.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
 import { type ModelDirectiveSelection, resolveModelDirectiveSelection } from "./model-selection.js";
 
@@ -39,6 +41,31 @@ function resolveStoredNumericProfileModelDirective(params: { raw: string; agentD
   }
 
   return { modelRaw, profileId, profileProvider: profile.provider };
+}
+
+/** Adapts directive transaction context to the model-selection owner. */
+export function resolveModelSelectionForDirectiveOnly(input: {
+  params: HandleDirectiveOnlyParams;
+  agentDir: string;
+  agentId: string;
+}) {
+  const { params } = input;
+  return resolveModelSelectionFromDirective({
+    directives: params.directives,
+    cfg: params.cfg,
+    agentDir: input.agentDir,
+    defaultProvider: params.defaultProvider,
+    defaultModel: params.defaultModel,
+    sessionDefaultProvider: params.sessionDefaultProvider,
+    sessionDefaultModel: params.sessionDefaultModel,
+    aliasIndex: params.aliasIndex,
+    allowedModelKeys: params.allowedModelKeys,
+    allowedModelCatalog: params.allowedModelCatalog,
+    provider: params.provider,
+    agentId: input.agentId,
+    modelPolicy: params.modelPolicy,
+    requesterProfileId: params.ctx ? readSessionInputProfileId(params.ctx) : undefined,
+  });
 }
 
 /** Resolves the requested model/profile override from parsed inline directives. */

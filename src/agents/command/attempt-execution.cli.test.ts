@@ -38,7 +38,6 @@ import { resetGeneratedMediaTaskActivityForTests } from "../../tasks/task-runtim
 import { createSuiteTempRootTracker } from "../../test-helpers/temp-dir.js";
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import { cleanupSessionStateForTest } from "../../test-utils/session-state-cleanup.js";
-import { createTestPreparedRunAdmission } from "../admitted-run-context.test-support.js";
 import { buildAgentRunTerminalOutcomeFromLifecycleEvent } from "../agent-run-terminal-outcome.js";
 import {
   createApiKeyCredential,
@@ -59,7 +58,6 @@ import type { EmbeddedAgentRunResult } from "../embedded-agent.js";
 import { FailoverError } from "../failover-error.js";
 import { GENERIC_EXTERNAL_RUN_FAILURE_TEXT } from "../failover/user-copy.js";
 import { LiveSessionModelSwitchError } from "../live-model-switch-error.js";
-import type { ModelFallbackAttemptProvenance } from "../model-fallback.types.js";
 import { buildConfiguredModelCatalog } from "../model-selection-shared.js";
 import { installSessionPlacementAdmissionProvider } from "../session-placement-admission.js";
 import { createAgentAttemptLifecycleCallbacks } from "./attempt-callbacks.js";
@@ -70,74 +68,18 @@ import {
   SUBAGENT_ANNOUNCE_EMBEDDED_DELIVERY_CASES,
   type SubagentAnnounceDeliveryCase,
 } from "./attempt-execution.announce.test-support.js";
+import {
+  makeRunAgentAttemptParams,
+  type RunAgentAttemptOverrides,
+  type RunAgentAttemptParams,
+} from "./attempt-execution.cli.test-support.js";
 import { runAgentAttempt as runAgentAttemptImpl } from "./attempt-execution.js";
 import { resolveClaudeCliProjectDirForWorkspace } from "./claude-cli-project-dir.js";
 import { resolveEmbeddedModelSelection } from "./model-selection.js";
 import { persistAcpTurnTranscript, persistCliTurnTranscript } from "./transcript-persistence.js";
 
-type RunAgentAttemptParams = Parameters<typeof runAgentAttemptImpl>[0];
 const runAgentAttempt = (params: RunAgentAttemptOverrides) =>
   runAgentAttemptImpl(makeRunAgentAttemptParams(params));
-
-type RunAgentAttemptOverrides = Omit<
-  Partial<RunAgentAttemptParams>,
-  | "agentDir"
-  | "modelRoutingProvenance"
-  | "opts"
-  | "runContext"
-  | "sessionEntry"
-  | "sessionKey"
-  | "workspaceDir"
-> & {
-  agentDir: RunAgentAttemptParams["agentDir"];
-  modelRoutingProvenance?: ModelFallbackAttemptProvenance;
-  sessionEntry: NonNullable<RunAgentAttemptParams["sessionEntry"]>;
-  sessionKey: NonNullable<RunAgentAttemptParams["sessionKey"]>;
-  workspaceDir: RunAgentAttemptParams["workspaceDir"];
-  opts?: Partial<RunAgentAttemptParams["opts"]>;
-  runContext?: Partial<RunAgentAttemptParams["runContext"]>;
-};
-
-function makeRunAgentAttemptParams(overrides: RunAgentAttemptOverrides): RunAgentAttemptParams {
-  const provider = overrides.providerOverride ?? "openai";
-  const model = overrides.modelOverride ?? "gpt-5.4";
-  const isFallbackRetry = overrides.isFallbackRetry ?? false;
-  const runId = overrides.runId ?? `run-${overrides.sessionEntry.sessionId}`;
-  const modelRoutingProvenance: ModelFallbackAttemptProvenance =
-    overrides.modelRoutingProvenance ?? {
-      requestedProvider: overrides.originalProvider ?? provider,
-      requestedModel: model,
-      stage: isFallbackRetry ? "fallback" : "initial",
-    };
-  return {
-    providerOverride: provider,
-    originalProvider: provider,
-    modelOverride: model,
-    cfg: {} as OpenClawConfig,
-    sessionId: overrides.sessionEntry.sessionId,
-    sessionAgentId: "main",
-    sessionFile: path.join(overrides.workspaceDir, "session.jsonl"),
-    body: "continue",
-    isFallbackRetry,
-    resolvedThinkLevel: "medium",
-    timeoutMs: 1_000,
-    runId,
-    spawnedBy: undefined,
-    messageChannel: undefined,
-    skillsSnapshot: undefined,
-    resolvedVerboseLevel: undefined,
-    onAgentEvent: vi.fn(),
-    authProfileProvider: provider,
-    sessionHasHistory: false,
-    ...overrides,
-    modelRoutingProvenance,
-    pluginGeneration: overrides.pluginGeneration,
-    preparedRunAdmission: overrides.preparedRunAdmission ?? createTestPreparedRunAdmission(runId),
-    lifecycleGeneration: overrides.lifecycleGeneration ?? getAgentEventLifecycleGeneration(),
-    opts: { ...overrides.opts } as RunAgentAttemptParams["opts"],
-    runContext: { ...overrides.runContext } as RunAgentAttemptParams["runContext"],
-  };
-}
 
 const runCliAgentMock = vi.hoisted(() => vi.fn());
 const runEmbeddedAgentMock = vi.hoisted(() => vi.fn());

@@ -41,6 +41,7 @@ describe("model selection with a channel default", () => {
       provider: "sub2api-op-go",
       model: "deepseek-v4-flash",
       isDefault: true,
+      resetToDefault: true,
     });
   });
 });

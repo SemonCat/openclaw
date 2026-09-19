@@ -1,6 +1,6 @@
 import { resolveAgentDir, type AgentModelPrimaryWriteTarget } from "../agents/agent-scope.js";
 import type { ModelCatalogEntry } from "../agents/model-catalog.js";
-import { modelKey } from "../agents/model-selection.js";
+import { modelKey, resolveDefaultModelForAgent } from "../agents/model-selection.js";
 import {
   createModelVisibilityPolicy,
   type ModelVisibilityPolicy,
@@ -202,8 +202,11 @@ export async function applySessionModelSelection(
   }
 
   const resetToDefault = params.request.resetToDefault === true;
-  const sessionDefaultProvider = params.sessionDefaultProvider ?? params.defaultProvider;
-  const sessionDefaultModel = params.sessionDefaultModel ?? params.defaultModel;
+  const configuredDefault = resetToDefault
+    ? resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId })
+    : { provider: params.defaultProvider, model: params.defaultModel };
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? configuredDefault.provider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? configuredDefault.model;
   const selectedRef = resetToDefault
     ? { provider: sessionDefaultProvider, model: sessionDefaultModel }
     : params.request;

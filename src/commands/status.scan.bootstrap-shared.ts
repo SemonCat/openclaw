@@ -138,7 +138,7 @@ export async function createStatusScanCoreBootstrap<TAgentStatus>(
               ...(skipColdStartNetworkChecks ? { skipProbe: true } : {}),
               localStatusRpcFallback: params.includeLocalStatusRpcFallback !== false,
             },
-        }),
+          }),
         { config: params.cfg, env: params.env },
       );
   const agentStatusPromise = skipColdStartNetworkChecks

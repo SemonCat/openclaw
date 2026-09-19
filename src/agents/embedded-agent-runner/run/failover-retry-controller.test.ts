@@ -11,7 +11,6 @@ import {
   markDiagnosticEmbeddedRunStarted,
   resolveRunStaleThresholdMs,
 } from "../../../logging/diagnostic-run-activity.js";
-import { FailoverError } from "../../failover-error.js";
 import { resolveRetryAfterMs } from "../../failover/retry-evidence.js";
 import {
   createDeferredEmbeddedRunLifecycleManager,

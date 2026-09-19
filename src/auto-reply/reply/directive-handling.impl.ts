@@ -19,7 +19,6 @@ import {
   MODEL_SELECTION_LOCKED_MESSAGE,
 } from "../../sessions/model-overrides.js";
 import { emitSessionLifecycleEvent } from "../../sessions/session-lifecycle-events.js";
-import { readSessionInputProfileId } from "../../sessions/session-participant-input.js";
 import {
   formatThinkingLevels,
   isThinkingLevelSupported,
@@ -31,7 +30,7 @@ import {
   resolveInvalidExecDirectiveMessage,
 } from "./directive-handling.arguments.js";
 import { applyModelRuntimeDirective } from "./directive-handling.model-runtime.js";
-import { resolveModelSelectionFromDirective } from "./directive-handling.model-selection.js";
+import { resolveModelSelectionForDirectiveOnly } from "./directive-handling.model-selection.js";
 import { maybeHandleModelDirectiveInfo } from "./directive-handling.model.js";
 import type { HandleDirectiveOnlyParams } from "./directive-handling.params.js";
 import { maybeHandleQueueDirective } from "./directive-handling.queue-validation.js";
@@ -149,21 +148,10 @@ export async function handleDirectiveOnly(
     return acknowledgeIgnoredDirective(modelInfo, "hasModelDirective");
   }
 
-  const modelResolution = resolveModelSelectionFromDirective({
-    directives,
-    cfg: params.cfg,
+  const modelResolution = resolveModelSelectionForDirectiveOnly({
+    params,
     agentDir,
-    defaultProvider,
-    defaultModel,
-    sessionDefaultProvider: params.sessionDefaultProvider,
-    sessionDefaultModel: params.sessionDefaultModel,
-    aliasIndex,
-    allowedModelKeys,
-    allowedModelCatalog,
-    provider,
     agentId: activeAgentId,
-    modelPolicy: params.modelPolicy,
-    requesterProfileId: params.ctx ? readSessionInputProfileId(params.ctx) : undefined,
   });
   if (modelResolution.errorText) {
     return rejectModelTransaction(modelResolution.errorText);

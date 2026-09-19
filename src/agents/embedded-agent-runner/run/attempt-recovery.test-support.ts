@@ -68,7 +68,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
       ? ["exec-3ce0"]
       : terminalizedLatestMissingResult
         ? ["exec-a731"]
-      : ["call_1", "call_2"];
+        : ["call_1", "call_2"];
   const allToolCalls = [...priorToolCalls, ...toolCalls];
   const priorToolAssistants = priorToolCalls.map((id) =>
     buildEmbeddedRunnerAssistant({
@@ -134,16 +134,22 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
           ? []
           : toolCalls
               .filter((id) => !scenario.missingToolResult || id !== "call_2")
-              .map((id) => ({
-                role: "toolResult",
-                toolCallId: id,
-                toolName: "exec",
-                isError:
-                  scenario.latestToolResult === "missing" || id === scenario.failedToolCallId,
-                ...(scenario.latestToolResult === "missing"
-                  ? { details: { reason: "missing_tool_result" } }
-                  : {}),
-              }))),
+              .map((id) =>
+                scenario.latestToolResult === "missing"
+                  ? {
+                      role: "toolResult",
+                      toolCallId: id,
+                      toolName: "exec",
+                      isError: true,
+                      details: { reason: "missing_tool_result" },
+                    }
+                  : {
+                      role: "toolResult",
+                      toolCallId: id,
+                      toolName: "exec",
+                      isError: id === scenario.failedToolCallId,
+                    },
+              )),
         ...priorToolCalls.map((id) => ({
           role: "toolResult",
           toolCallId: id,
@@ -222,15 +228,20 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     >[0]["runParams"],
     provider: "openai",
     modelId: "gpt-5.6-luna",
-    globalLane: "test",
     agentDir: "/tmp/provider-recovery-test",
-    fallbackConfigured: false,
     profileFailureStore: {
       version: 1,
-      profiles: { "openai:test-profile": { type: "oauth", provider: "openai" } },
+      profiles: {
+        "openai:test-profile": {
+          type: "oauth",
+          provider: "openai",
+          access: "test-access",
+          refresh: "test-refresh",
+          expires: 4_000_000_000_000,
+        },
+      },
     },
     getLastProfileId: () => "openai:test-profile",
-    getSessionId: () => "session:transport-drop",
     harnessOwnsTransport: () => scenario.pluginHarnessOwnsTransport ?? false,
     getRuntimeAuthOwnerId: () => "embedded",
     getApiKeyInfo: () => null,
@@ -268,7 +279,15 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
         genericCompactionRecoveryAllowed: scenario.compactionEnabled ?? false,
         attemptAuthProfileStore: {
           version: 1,
-          profiles: { "openai:test-profile": { type: "oauth", provider: "openai" } },
+          profiles: {
+            "openai:test-profile": {
+              type: "oauth",
+              provider: "openai",
+              access: "test-access",
+              refresh: "test-refresh",
+              expires: 4_000_000_000_000,
+            },
+          },
         },
         maybeRefreshRuntimeAuthForAuthError: vi.fn(async () => false),
         setThinkLevel: vi.fn(),

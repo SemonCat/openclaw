@@ -84,56 +84,12 @@ vi.mock("../gateway/worker-environments/placement-session-runtime.js", () => ({
     placementMocks.resolveWorkerPlacementSessionRuntimeCapabilities,
 }));
 
+import { applySessionModelSelection } from "./apply-session-model-selection.js";
 import {
-  applySessionModelSelection,
-  type ApplySessionModelSelectionParams,
-} from "./apply-session-model-selection.js";
-
-const catalog = [
-  {
-    provider: "anthropic",
-    id: "claude-opus-4-6",
-    name: "Claude Opus",
-    contextTokens: 32_000,
-  },
-  { provider: "openai", id: "gpt-4o", name: "GPT-4o", contextTokens: 16_000 },
-] satisfies ModelCatalogEntry[];
-
-function createEntry(overrides: Partial<SessionEntry> = {}): SessionEntry {
-  return {
-    sessionId: "session-1",
-    updatedAt: 1,
-    delivery: { kind: "none" },
-    ...overrides,
-  };
-}
-
-function createParams(overrides: Partial<ApplySessionModelSelectionParams> = {}) {
-  const sessionEntry = overrides.sessionEntry ?? createEntry();
-  const sessionKey = overrides.sessionKey ?? "agent:main:dm:1";
-  return {
-    cfg: {},
-    agentId: "main",
-    sessionKey,
-    sessionEntry,
-    sessionStore: { [sessionKey]: sessionEntry },
-    defaultProvider: "anthropic",
-    defaultModel: "claude-opus-4-6",
-    currentProvider: "anthropic",
-    currentModel: "claude-opus-4-6",
-    modelCatalog: catalog,
-    thinkingCatalog: catalog,
-    canPersistStickyModelSelection: false,
-    request: {
-      provider: "openai",
-      model: "gpt-4o",
-      isDefault: false,
-      runtime: { kind: "unchanged" },
-    },
-    markLiveSwitchPending: true,
-    ...overrides,
-  } satisfies ApplySessionModelSelectionParams;
-}
+  modelSelectionTestCatalog as catalog,
+  createModelSelectionTestEntry as createEntry,
+  createModelSelectionTestParams as createParams,
+} from "./apply-session-model-selection.test-support.js";
 
 beforeEach(() => {
   vi.mocked(loadProviderScopedThinkingCatalog).mockReset().mockResolvedValue([]);
