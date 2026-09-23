@@ -10,6 +10,7 @@ import type {
 
 export function getRestartRecoveryReplayError(entry: SubagentRunRecord): string | undefined {
   return entry.terminalOwner !== "interrupted-recovery" ||
+    typeof entry.cleanupCompletedAt === "number" ||
     entry.pauseReason === "sessions_yield" ||
     entry.execution.status !== "terminal" ||
     typeof entry.execution.endedAt !== "number" ||

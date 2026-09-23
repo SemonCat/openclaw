@@ -318,6 +318,9 @@ describe("subagent registry restart recovery", () => {
       error: "saved exact failure",
       endedAt,
     });
+    replay.cleanupCompletedAt = endedAt;
+    replay.cleanupHandled = true;
+    await expect(recover(replay)).resolves.toEqual({ status: "ignored" });
     expect(mocks.loadSessionEntry).not.toHaveBeenCalled();
     expect(dispatchAgent).not.toHaveBeenCalled();
   });
