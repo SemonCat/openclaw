@@ -2,6 +2,22 @@
 import { patchSessionEntryCore } from "../../config/sessions/session-accessor.js";
 import { mergeSessionSnapshotChanges } from "../../config/sessions/session-snapshot-merge.js";
 import type { SessionEntry } from "../../config/sessions/types.js";
+export type AgentFallbackRuntimeState = {
+  originRuntime?: "cli" | "embedded";
+  continueFromSettledTranscript?: boolean;
+};
+
+/** Arms transcript continuation for every remaining model in the fallback chain. */
+export function createSettledTranscriptFallbackCallback(
+  state: AgentFallbackRuntimeState | undefined,
+): (() => void) | undefined {
+  return state
+    ? () => {
+        state.continueFromSettledTranscript = true;
+      }
+    : undefined;
+}
+
 /** Parameters for merging and persisting a session entry update. */
 type PersistSessionEntryParams = {
   agentId: string;

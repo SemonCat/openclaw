@@ -61,6 +61,9 @@ export type ApplySessionModelSelectionParams = {
   allowCreate?: boolean;
   defaultProvider: string;
   defaultModel: string;
+  /** Effective default for this session after channel/thread routing policy. */
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   currentProvider: string;
   currentModel: string;
   modelPolicy?: Omit<ModelVisibilityPolicy, "catalog">;
@@ -200,8 +203,13 @@ export async function applySessionModelSelection(
   }
 
   const resetToDefault = params.request.resetToDefault === true;
-  const selectedRef = resetToDefault
+  const configuredDefault = resetToDefault
     ? resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId })
+    : { provider: params.defaultProvider, model: params.defaultModel };
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? configuredDefault.provider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? configuredDefault.model;
+  const selectedRef = resetToDefault
+    ? { provider: sessionDefaultProvider, model: sessionDefaultModel }
     : params.request;
   const normalizedModelKey = modelKey(selectedRef.provider, selectedRef.model);
   const request: SessionModelSelectionRequest = {
@@ -210,7 +218,7 @@ export async function applySessionModelSelection(
     model: selectedRef.model,
     isDefault:
       resetToDefault ||
-      normalizedModelKey === modelKey(params.defaultProvider, params.defaultModel),
+      normalizedModelKey === modelKey(sessionDefaultProvider, sessionDefaultModel),
   };
   const policy =
     params.modelPolicy ??
@@ -224,7 +232,6 @@ export async function applySessionModelSelection(
   if (!resetToDefault && !policy.allows(request)) {
     return rejectNotAllowed(request.provider, request.model);
   }
-
   const prepared = await prepareModelSelectionRuntime({
     cfg: params.cfg,
     agentId: params.agentId,

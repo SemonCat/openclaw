@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
     typeof import("../../skills/discovery/status.js").buildWorkspaceSkillReadiness
   >(() => ({ workspaceDir: "/tmp/mock-skills", eligible: 0, missing: 0 })),
   resolveStatusSummaryFromOverview: vi.fn(async () => ({})),
+  buildPluginCompatibilitySnapshotNotices: vi.fn(() => []),
 }));
 
 vi.mock("../../agents/exec-defaults.js", () => ({
@@ -62,11 +63,7 @@ vi.mock("../../infra/restart-sentinel.js", () => ({
   readRestartSentinelReadOnly: mocks.readRestartSentinelReadOnly,
 }));
 vi.mock("../../plugins/status.js", () => ({
-  buildPluginCompatibilityNotices: () => [],
-  withPluginDiagnosticsReport: async <T>(
-    _params: unknown,
-    consume: (report: object) => T | Promise<T>,
-  ) => consume({}),
+  buildPluginCompatibilitySnapshotNotices: mocks.buildPluginCompatibilitySnapshotNotices,
 }));
 vi.mock("../../skills/discovery/status.js", () => ({
   buildWorkspaceSkillReadiness: mocks.buildWorkspaceSkillReadiness,
@@ -268,6 +265,7 @@ describe("buildStatusAllReportData", () => {
         probeHosts: ["127.0.0.1"],
       });
       expect(mocks.resolveStatusSummaryFromOverview).toHaveBeenCalledOnce();
+      expect(mocks.buildPluginCompatibilitySnapshotNotices).toHaveBeenCalledWith({ config: {} });
     },
   );
 

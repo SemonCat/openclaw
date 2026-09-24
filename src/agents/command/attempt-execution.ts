@@ -104,9 +104,13 @@ import { DEFAULT_MAX_LIVE_TOOL_RESULT_CHARS } from "../tool-result-limits.js";
 import {
   buildClaudeCliFallbackContextPrelude,
   claudeCliSessionTranscriptHasContent,
-  resolveFallbackRetryPrompt,
   rebaseExecApprovalContinuationPromptRange,
+  resolveFallbackRetryPrompt,
 } from "./attempt-execution.helpers.js";
+import {
+  createSettledTranscriptFallbackCallback,
+  type AgentFallbackRuntimeState,
+} from "./attempt-execution.shared.js";
 import { resolveAgentRunContext } from "./run-context.js";
 import {
   consumeCliSessionForkInStore,
@@ -275,7 +279,7 @@ export function runAgentAttempt(params: {
   allowTransientCooldownProbe?: boolean;
   modelFallbacksOverride?: string[];
   sessionHasHistory?: boolean;
-  fallbackRuntimeState?: { originRuntime?: "cli" | "embedded" };
+  fallbackRuntimeState?: AgentFallbackRuntimeState;
   suppressPromptPersistenceOnRetry?: boolean;
   userTurnTranscriptRecorder?: UserTurnTranscriptRecorder;
   assistantErrorTranscript?: RunEmbeddedAgentInternalParams["assistantErrorTranscript"];
@@ -399,6 +403,7 @@ export function runAgentAttempt(params: {
     isFallbackRetry: params.isFallbackRetry,
     sessionHasHistory: params.sessionHasHistory,
     priorContextPrelude: claudeCliFallbackPrelude,
+    continueFromSettledTranscript: params.fallbackRuntimeState?.continueFromSettledTranscript,
   });
   const effectivePrompt = isRawModelRun
     ? resolvedPrompt
@@ -677,6 +682,8 @@ export function runAgentAttempt(params: {
               isFallbackRetry: params.isFallbackRetry,
               sessionHasHistory: params.sessionHasHistory,
               priorContextPrelude: claudeCliFallbackPrelude,
+              continueFromSettledTranscript:
+                params.fallbackRuntimeState?.continueFromSettledTranscript,
             })
           : resolvedPrompt;
         const cliEffectivePrompt = params.opts.execApprovalContinuationPromptRange
@@ -1026,6 +1033,9 @@ export function runAgentAttempt(params: {
     requestedRouteResolution: "resolved",
     modelThinkingCapability: params.modelThinkingCapability,
     modelFallbacksOverride: params.modelFallbacksOverride,
+    onSettledTranscriptModelFallback: createSettledTranscriptFallbackCallback(
+      params.fallbackRuntimeState,
+    ),
     authProfileId,
     authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
     isFinalFallbackAttempt: params.isFinalFallbackAttempt,
@@ -1063,6 +1073,8 @@ export function runAgentAttempt(params: {
     onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
     onDeferredLifecycleAbort: params.deferredLifecycle?.abort,
     onRetryWait: params.deferredLifecycle?.beginRetryWait,
+    skipPreparedUserTurnMessage:
+      params.isFallbackRetry && params.fallbackRuntimeState?.continueFromSettledTranscript === true,
     assistantErrorTranscript: params.assistantErrorTranscript,
     authProfileFailurePolicy: params.authProfileFailurePolicy,
     onUserMessagePersisted: params.onUserMessagePersisted,

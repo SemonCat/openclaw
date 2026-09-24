@@ -170,6 +170,12 @@ export class CodexNativeToolLifecycleProjector {
     };
   }
 
+  activeCommandExecutions(): ReadonlyArray<{ toolCallId: string; toolName: string }> {
+    return [...this.activeItems]
+      .filter(([, item]) => item.toolName === "bash")
+      .map(([toolCallId, item]) => ({ toolCallId, toolName: item.toolName }));
+  }
+
   recordMcpToolCallReceipt(notification: CodexServerNotification): void {
     const params = isJsonObject(notification.params) ? notification.params : undefined;
     if (!params || !isCodexNotificationForTurn(params, this.threadId, this.turnId)) {
