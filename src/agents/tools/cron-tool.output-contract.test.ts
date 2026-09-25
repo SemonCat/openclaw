@@ -111,6 +111,11 @@ describe("automations output contract", () => {
     },
     { name: "job details", args: { action: "get", jobId: job.id }, reply: job },
     {
+      name: "job details with schedule diagnostics",
+      args: { action: "get", jobId: job.id },
+      reply: { ...job, state: { scheduleErrorCount: 3, lastError: "invalid cron expression" } },
+    },
+    {
       name: "creation",
       args: { action: "add", job: createJob },
       reply: { ...job, deliveryPreview },

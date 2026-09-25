@@ -104,6 +104,43 @@ describe("gateway tool runtime identity", () => {
     expect(capturedGatewayCall()).not.toHaveProperty("agentRuntimeIdentityToken");
   });
 
+  it.each([true, false])(
+    "transports delegated setup permission %s with the exact tool lifetime",
+    async (fullPermission) => {
+      const operationalRunInstance = createOperationalRunInstanceRef("setup-wire-run");
+      const controller = new AbortController();
+      await withActiveGatewayToolCallerIdentity(
+        {
+          agentId: "main",
+          sessionKey: "agent:main:main",
+          operationalRunInstance,
+          fullPermission,
+          approvalSignals: [controller.signal],
+        },
+        async () => {
+          mocks.callGateway.mockResolvedValueOnce({ reply: "done" });
+          await callGatewayTool(
+            "openclaw.chat",
+            {},
+            {
+              sessionId: "setup-wire",
+              message: "inspect configuration",
+              delegation: { agentId: "main", sessionKey: "agent:main:main" },
+            },
+          );
+          const token = capturedGatewayCall().agentRuntimeIdentityToken;
+          expect(token).toBeTypeOf("string");
+          const identity = await verifyAgentRuntimeIdentityToken(token!);
+          expect(identity).toMatchObject({ operationalRunInstance });
+          expect(identity?.fullPermission === true).toBe(fullPermission);
+          expect(createAgentRuntimeApprovalAuthorityValidator()(identity!)).toBe(true);
+          controller.abort();
+          expect(createAgentRuntimeApprovalAuthorityValidator()(identity!)).toBe(false);
+        },
+      );
+    },
+  );
+
   it.each([
     ["cron.remove", { id: "job-1" }, { id: "job-1" }],
     ["wake", { mode: "now", text: "ping" }, { ok: true }],

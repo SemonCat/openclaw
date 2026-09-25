@@ -26,10 +26,7 @@ import {
 import type { AgentRuntimeSessionSpawnContext } from "./agent-runtime-session-spawn-context.js";
 import { hasCronCreatorGrantProvenance } from "./cron-creator-authority-grant.js";
 import type { CronCreatorAuthorityGrant } from "./cron-creator-authority-grant.types.js";
-import {
-  resolveMessageActionTurnCapability,
-  type AgentRuntimeMessageActionContext,
-} from "./message-action-turn-capability.js";
+import type { AgentRuntimeMessageActionContext } from "./message-action-turn-capability.js";
 import type { GatewayUiCommandTarget } from "./ui-command-target.types.js";
 import type { WorkerSessionTurnClaim } from "./worker-environments/placement-record.js";
 
@@ -49,6 +46,8 @@ export type AgentRuntimeIdentity = {
   sessionKey: string;
   operationalRunInstance: OperationalRunInstanceRef;
   delegatedAuthority: AgentRuntimeDelegatedAuthority;
+  /** Host-prepared setup permission; only an explicit true can bypass human approval. */
+  fullPermission?: boolean;
   approvalOwnerPluginId?: string;
   executionIdentity?: ExecutionIdentityAdmissionToken;
   turnSourceChannel?: string;
@@ -221,6 +220,7 @@ const agentRuntimeIdentityTokenPayloadSchema = z.object({
   sessionKey: z.string(),
   operationalRunInstance: operationalRunInstanceSchema,
   delegatedAuthority: delegatedAuthoritySchema,
+  fullPermission: z.boolean().optional(),
   approvalOwnerPluginId: z.string().optional().catch(undefined),
   executionIdentity: z.unknown().optional(),
   turnSourceChannel: z.string().optional().catch(undefined),
@@ -410,6 +410,7 @@ function parsePayload(value: unknown, nowMs: number): AgentRuntimeIdentityTokenP
       sessionKey,
       operationalRunInstance,
       delegatedAuthority,
+      ...(raw.fullPermission !== undefined ? { fullPermission: raw.fullPermission } : {}),
       ...(approvalOwnerPluginId ? { approvalOwnerPluginId } : {}),
       ...(turnSourceChannel ? { turnSourceChannel } : {}),
       ...(turnSourceLocal ? { turnSourceLocal } : {}),
@@ -438,6 +439,7 @@ export type AgentRuntimeIdentityTokenParams = {
   agentId: string;
   sessionKey: string;
   operationalRunInstance: OperationalRunInstanceRef;
+  fullPermission?: boolean;
   approvalOwnerPluginId?: string;
   executionIdentityToken?: ExecutionIdentityAdmissionToken;
   turnSourceChannel?: string;
@@ -550,6 +552,7 @@ function prepareAgentRuntimeIdentityTokenPayload(
       runId: operationalRunId,
     },
     delegatedAuthority,
+    ...(params.fullPermission !== undefined ? { fullPermission: params.fullPermission } : {}),
     ...(normalizeOptionalString(params.approvalOwnerPluginId)
       ? { approvalOwnerPluginId: normalizeOptionalString(params.approvalOwnerPluginId) }
       : {}),
@@ -656,6 +659,7 @@ function resolveAgentRuntimeIdentityPayload(
     sessionKey: payload.sessionKey,
     operationalRunInstance: payload.operationalRunInstance,
     delegatedAuthority: payload.delegatedAuthority,
+    ...(payload.fullPermission !== undefined ? { fullPermission: payload.fullPermission } : {}),
     ...(payload.approvalOwnerPluginId
       ? { approvalOwnerPluginId: payload.approvalOwnerPluginId }
       : {}),
@@ -689,47 +693,7 @@ function resolveAgentRuntimeIdentityPayload(
     : identity;
 }
 
-export type AgentRuntimeApprovalAuthorityValidator = (identity: AgentRuntimeIdentity) => boolean;
-
-type WorkerTurnClaimValidator = {
-  validateTurnClaim(claim: WorkerSessionTurnClaim): boolean;
-};
-
-function validateAgentRuntimeDelegatedAuthority(
-  authority: AgentRuntimeDelegatedAuthority,
-  placements?: WorkerTurnClaimValidator,
-): boolean {
-  if (!validateAgentRunDelegatedAuthority(authority)) {
-    return false;
-  }
-  return authority.kind === "local"
-    ? true
-    : placements?.validateTurnClaim?.(authority.turnClaim) === true;
-}
-
-/** Builds the use-time approval gate from the run owner and canonical worker store. */
-export function createAgentRuntimeApprovalAuthorityValidator(
-  placements?: WorkerTurnClaimValidator,
-): AgentRuntimeApprovalAuthorityValidator {
-  return (identity) => {
-    if (!validateAgentRuntimeDelegatedAuthority(identity.delegatedAuthority, placements)) {
-      return false;
-    }
-    const messageActionContext = identity.messageActionContext;
-    if (!messageActionContext) {
-      return true;
-    }
-    if (!messageActionContext.turnCapability) {
-      return false;
-    }
-    return Boolean(
-      resolveMessageActionTurnCapability({
-        token: messageActionContext.turnCapability,
-        agentId: identity.agentId,
-        runId: identity.operationalRunInstance.runId,
-        sessionKey: identity.sessionKey,
-        sessionId: messageActionContext.sessionId,
-      }),
-    );
-  };
-}
+export {
+  createAgentRuntimeApprovalAuthorityValidator,
+  type AgentRuntimeApprovalAuthorityValidator,
+} from "./agent-runtime-approval-authority.js";
