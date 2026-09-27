@@ -948,7 +948,7 @@ describe("cron tool", () => {
       // #137418 / #123982: pin the non-revealing recovery guidance delivered to
       // the model, not a guarantee that every model will follow it.
       expect(tool.description).toContain(
-        "configured channel owner and Control UI administrator turns can list/get/update/run/remove any Gateway automation",
+        "configured channel owner and Control UI administrator turns can list/get/runs/update/run/remove any Gateway automation",
       );
       expect(tool.description).toContain(
         "totals/counts and hasMore describe that scoped view, not global inventory",

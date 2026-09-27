@@ -1172,10 +1172,10 @@ export const cronHandlers: GatewayRequestHandlers = {
     }
     const p = params as CronRunsParams;
     const callerScope = readCronCallerScope(client);
-    const explicitScope = p.scope;
+    const needsOwnedJob = callerScope && !callerScope.manageAll;
     const hasJobSelector = p.id !== undefined || p.jobId !== undefined;
     const jobId = resolveCronJobId(p);
-    const scope: "job" | "all" = explicitScope ?? (hasJobSelector ? "job" : "all");
+    const scope: "job" | "all" = p.scope ?? (hasJobSelector ? "job" : "all");
     const cronVisibility = resolveCronSessionVisibility(client, context.getRuntimeConfig());
     if (scope === "all") {
       if (callerScope) {
@@ -1226,9 +1226,9 @@ export const cronHandlers: GatewayRequestHandlers = {
         })
           ? job
           : undefined;
-      // Operator history survives job deletion; scoped reads still need a live, matching owner.
+      // Live managers can read retained history; other scoped reads need a matching job.
       const storeKey = cronStoreKey(context.cronStorePath);
-      if ((callerScope || p.agentId || cronVisibility) && !matchedJob) {
+      if ((needsOwnedJob || p.agentId || cronVisibility) && !matchedJob) {
         respondCronJobNotFound(respond, jobId);
         return;
       }

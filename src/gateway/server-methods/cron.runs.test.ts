@@ -297,82 +297,108 @@ describe("cron.runs session visibility", () => {
 });
 
 describe("automation history through admitted agent tools", () => {
-  it.each(["channel-owner", "control-ui-admin", "unprivileged", "revoked-owner"] as const)(
-    "keeps get and runs consistent for %s",
-    async (source) => {
-      await withCronHistory(async ({ foreignJobId, cron, context }) => {
-        const operationalRunInstance = createOperationalRunInstanceRef("history-management-run");
-        const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
-        let current = true;
-        const scope = createCronCreatorAuthorityRunScope(
-          operationalRunInstance.runId,
-          source === "control-ui-admin"
-            ? { kind: "unknown" }
-            : { kind: "external", channel: "mattermost" },
-          source === "unprivileged"
-            ? undefined
-            : source === "control-ui-admin"
-              ? { source }
-              : { source: "channel-owner", isCurrent: () => current },
-        );
-        try {
-          await runWithCronCreatorAuthorityCapability(scope, () =>
-            withGatewayToolCallerIdentity(
-              {
-                agentId: "main",
-                sessionKey: "agent:main:mattermost:channel:history-manager",
-                operationalRunInstance,
-                approvalAuthority: authority,
-                receiptAuthority: () => validateAgentRunDelegatedAuthority(authority),
-                gatewayContextResolver: () => context,
-              },
-              async () => {
-                const tool = createCronTool({
-                  runId: operationalRunInstance.runId,
-                  agentSessionKey: "agent:main:mattermost:channel:history-manager",
-                });
-                if (source === "unprivileged") {
-                  await expect(
-                    tool.execute("history", { action: "runs", jobId: foreignJobId }),
-                  ).rejects.toThrow(/not found/i);
-                  return;
+  it.each([
+    "channel-owner",
+    "control-ui-admin",
+    "unprivileged",
+    "revoked-owner",
+    "deleted-owner",
+    "deleted-unprivileged",
+    "deleted-revoked-owner",
+  ] as const)("keeps get and runs consistent for %s", async (source) => {
+    await withCronHistory(async ({ foreignJobId, cron, context }) => {
+      const operationalRunInstance = createOperationalRunInstanceRef("history-management-run");
+      const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+      let current = true;
+      const scope = createCronCreatorAuthorityRunScope(
+        operationalRunInstance.runId,
+        source === "control-ui-admin"
+          ? { kind: "unknown" }
+          : { kind: "external", channel: "mattermost" },
+        source.includes("unprivileged")
+          ? undefined
+          : source === "control-ui-admin"
+            ? { source }
+            : { source: "channel-owner", isCurrent: () => current },
+      );
+      try {
+        await runWithCronCreatorAuthorityCapability(scope, () =>
+          withGatewayToolCallerIdentity(
+            {
+              agentId: "main",
+              sessionKey: "agent:main:mattermost:channel:history-manager",
+              operationalRunInstance,
+              approvalAuthority: authority,
+              receiptAuthority: () => validateAgentRunDelegatedAuthority(authority),
+              gatewayContextResolver: () => context,
+            },
+            async () => {
+              const tool = createCronTool({
+                runId: operationalRunInstance.runId,
+                agentSessionKey: "agent:main:mattermost:channel:history-manager",
+              });
+              if (source.includes("unprivileged")) {
+                if (source.startsWith("deleted-")) {
+                  await cron.remove(foreignJobId);
                 }
                 await expect(
-                  tool.execute("get", { action: "get", jobId: foreignJobId }),
-                ).resolves.toMatchObject({ details: { id: foreignJobId } });
-                if (source === "revoked-owner") {
-                  const readJob = cron.readJob.bind(cron);
-                  vi.spyOn(cron, "readJob").mockImplementationOnce(async (...args) => {
-                    const job = await readJob(...args);
-                    current = false;
-                    return job;
-                  });
-                  await expect(
-                    tool.execute("history", { action: "runs", jobId: foreignJobId }),
-                  ).rejects.toThrow(/admin grant.*missing, expired, or already used/i);
-                } else {
-                  await expect(
-                    tool.execute("history", { action: "runs", jobId: foreignJobId }),
-                  ).resolves.toMatchObject({
-                    details: {
-                      entries: [
-                        expect.objectContaining({
-                          jobId: foreignJobId,
-                          summary: "needle foreign job",
-                        }),
-                      ],
-                      total: 1,
-                    },
-                  });
-                }
-              },
-            ),
-          );
-        } finally {
-          revokeCronCreatorAuthorityRunScope(scope);
-          releaseAgentRunDelegatedAuthority(authority);
-        }
-      });
-    },
-  );
+                  tool.execute("history", {
+                    action: "runs",
+                    jobId: foreignJobId,
+                    runId: "history-run-5",
+                    waitSeconds: 1,
+                  }),
+                ).rejects.toThrow(/not found/i);
+                return;
+              }
+              await expect(
+                tool.execute("get", { action: "get", jobId: foreignJobId }),
+              ).resolves.toMatchObject({ details: { id: foreignJobId } });
+              if (source.startsWith("deleted-")) {
+                await cron.remove(foreignJobId);
+              }
+              if (source.endsWith("revoked-owner")) {
+                const readJob = cron.readJob.bind(cron);
+                vi.spyOn(cron, "readJob").mockImplementationOnce(async (...args) => {
+                  const job = await readJob(...args);
+                  current = false;
+                  return job;
+                });
+                await expect(
+                  tool.execute("history", {
+                    action: "runs",
+                    jobId: foreignJobId,
+                    runId: "history-run-5",
+                    waitSeconds: 1,
+                  }),
+                ).rejects.toThrow(/admin grant.*missing, expired, or already used/i);
+              } else {
+                await expect(
+                  tool.execute("history", {
+                    action: "runs",
+                    jobId: foreignJobId,
+                    runId: "history-run-5",
+                    waitSeconds: 1,
+                  }),
+                ).resolves.toMatchObject({
+                  details: {
+                    entries: [
+                      expect.objectContaining({
+                        jobId: foreignJobId,
+                        summary: "needle foreign job",
+                      }),
+                    ],
+                    total: 1,
+                  },
+                });
+              }
+            },
+          ),
+        );
+      } finally {
+        revokeCronCreatorAuthorityRunScope(scope);
+        releaseAgentRunDelegatedAuthority(authority);
+      }
+    });
+  });
 });

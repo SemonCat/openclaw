@@ -50,6 +50,7 @@ import {
   resolveCronCreatorExecToolTarget,
 } from "./cron-tool-creator-cap.js";
 import { CronToolOutputSchema } from "./cron-tool-output-schema.js";
+import { readCronToolRunHistory } from "./cron-tool-runs.js";
 import {
   assertCronPacingInput,
   createCronToolSchema,
@@ -189,7 +190,7 @@ function buildCronToolDescription(params: { triggersEnabled: boolean }): string 
   const silentWatcherCue = params.triggersEnabled ? ' Silent watcher=>mode:"none".' : "";
   return `Gateway scheduler: reminders, delayed self-wakeups, loops, recurring work${params.triggersEnabled ? ", event watchers" : ""}. Never exec sleep/poll as timer.
 
-ACTIONS: status | list [includeDisabled,limit?,offset?] (compact summaries with timing; use nextOffset for the next page) | get jobId (full schedule, payload, and delivery details) | add job | update jobId job (partial: only supplied fields change; null clears) | remove jobId | run jobId (runMode "force"=now) | runs jobId = history | next_check in:"30m" (own paced run only) | wake text mode?:"now"|"next-heartbeat"(default) nudges a caller-owned lane (sessionKey/agentId to pick another).
+ACTIONS: status | list [includeDisabled,limit?,offset?] (compact summaries with timing; use nextOffset for the next page) | get jobId (full schedule, payload, and delivery details) | add job | update jobId job (partial: only supplied fields change; null clears) | remove jobId | run jobId (runMode "force"=now) | runs jobId [runId,waitSeconds:0-60] = history or bounded wait for that exact run | next_check in:"30m" (own paced run only) | wake text mode?:"now"|"next-heartbeat"(default) nudges a caller-owned lane (sessionKey/agentId to pick another).
 
 SCOPE: Authenticated configured channel owner and Control UI administrator turns can list/get/runs/update/run/remove any Gateway automation. Other turns see only caller-visible jobs; totals/counts and hasMore describe that scoped view, not global inventory. In that restricted view, an empty list or failed list/get/update/remove (including not-found) does not establish global absence, whatever the source of a known job id (including your own history). Never recreate or replace a known automation to satisfy an update/remove or reconciliation request solely because of these results. Report that you cannot establish global absence and ask an authorized administrator to check through a fresh authenticated configured channel owner or Control UI administrator turn or the Automations page; do not bypass caller scope. Genuinely new, requested automations can still be created.
 
@@ -199,6 +200,8 @@ SCHEDULE:
 - {kind:"at",at:"ISO-8601"} one-shot; no tz=UTC; auto-deletes after successful completion: delivery confirmed, not requested, intentionally silent, or explicitly bestEffort. Failed/unknown required delivery retains it disabled.
 - {kind:"every",everyMs}.
 - {kind:"cron",expr,tz?:"IANA"}: expr is wall time in tz; never pre-convert to UTC; no tz=gateway host local. 18:00 Shanghai => {expr:"0 18 * * *",tz:"Asia/Shanghai"}.${streamScheduleLine}
+
+RUN FOLLOW-UP: run returns admission, not completion. Use runs with that runId and waitSeconds:60 in this conversation; a wait timeout does not cancel the run, so check the same runId again, never re-run it just to check. Inspect completionStatus, deliveryStatus and summary; execution status alone does not prove delivery. Do not create another automation to inspect get/runs: scheduled agents only inspect their own job, even with sessionTarget:"current".
 
 TARGET+PAYLOAD:
 - "current" (agentTurn default) = this conversation: the run stays detached, reads bounded chat context, then commits its final visible assistant result to this conversation's durable history. Self-wakeup/"continue later"/loop = at|every + agentTurn + current.
@@ -230,7 +233,7 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
     name: AUTOMATIONS_TOOL_NAME,
     displaySummary: CRON_TOOL_DISPLAY_SUMMARY,
     description: managementAuthority?.managementOnly
-      ? 'Manage any existing automation on this Gateway with the admitted automation management authority. Actions: list [includeDisabled,limit,offset] (compact summaries with timing; follow nextOffset); get jobId (full schedule, payload, and delivery details); runs jobId (execution history); update jobId job (partial patch, null clears); run jobId (runMode:"force" runs now); remove jobId. Creator attribution and scheduled execution policy stay intact. Use the Automations page for other actions.'
+      ? 'Manage any existing automation on this Gateway with the admitted automation management authority. Actions: list [includeDisabled,limit,offset] (compact summaries with timing; follow nextOffset); get jobId (full schedule, payload, and delivery details); runs jobId [runId,waitSeconds:0-60] (execution history or bounded wait); update jobId job (partial patch, null clears); run jobId (runMode:"force" runs now); remove jobId. After run, use its runId with runs and waitSeconds to observe completion in this conversation. Do not create a cron checker for another job: scheduled agents only inspect themselves. Creator attribution and scheduled execution policy stay intact. Use the Automations page for other actions.'
       : buildCronToolDescription({ triggersEnabled }),
     outputSchema: CronToolOutputSchema,
     parameters: createCronToolSchema({
@@ -282,6 +285,9 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
         );
       }
       assertCronSelfRemoveScope(opts, action, params);
+      if (action !== "runs" && params.waitSeconds !== undefined) {
+        throw new Error('waitSeconds is only supported by action="runs" with the returned runId.');
+      }
       const parsedGatewayOpts = readGatewayCallOptions(params);
       const gatewayOpts: GatewayCallOptions = {
         ...parsedGatewayOpts,
@@ -649,10 +655,13 @@ export function createCronTool(opts?: CronToolOptions, deps?: CronToolDeps): Any
             );
           }
           case "runs": {
-            const id = requireCronJobIdParam(params);
             return jsonResult(
-              await callGateway("cron.runs", gatewayOpts, {
-                id,
+              await readCronToolRunHistory({
+                id: requireCronJobIdParam(params),
+                params,
+                gatewayOpts,
+                callGateway,
+                signal: operationSignal,
               }),
             );
           }
