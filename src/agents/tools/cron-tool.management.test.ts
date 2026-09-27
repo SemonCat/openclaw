@@ -197,11 +197,12 @@ describe("Control UI admin automation management tool", () => {
     },
   );
 
-  it("advertises only the five admitted management actions and their inputs remotely", async () => {
+  it("advertises only the admitted management actions and their inputs remotely", async () => {
     await withAdminTool("unknown", async ({ tool }) => {
       expect(tool.parameters).toHaveProperty("properties.action.enum", [
         "list",
         "get",
+        "runs",
         "update",
         "run",
         "remove",
