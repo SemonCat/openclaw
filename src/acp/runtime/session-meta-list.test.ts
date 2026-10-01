@@ -171,4 +171,43 @@ describe("ACP session listing", () => {
       }
     });
   });
+
+  it("omits ownerless legacy rows while retaining explicitly owned sessions", async () => {
+    await withTestDir({ prefix: "openclaw-acp-list-ownerless-" }, async (dir) => {
+      const env = { ...process.env, OPENCLAW_STATE_DIR: dir };
+      const cfg = {
+        agents: { ownership: "explicit", entries: { ops: {}, research: {} } },
+      } satisfies OpenClawConfig;
+      const sessionKey = "agent:ops:acp:owned";
+      await replaceSessionEntry(
+        { agentId: "ops", sessionKey, env },
+        { sessionId: "owned", updatedAt: 100 },
+      );
+      for (const key of ["global", sessionKey]) {
+        writeAcpSessionMetaForMigration({
+          env,
+          sessionKey: key,
+          sessionId: key === "global" ? "legacy" : "owned",
+          meta: {
+            backend: "acpx",
+            agent: "ops",
+            runtimeSessionName: key,
+            mode: "persistent",
+            state: "idle",
+            lastActivityAt: 100,
+          },
+        });
+      }
+      await closeOpenClawAgentDatabasesAsync();
+      await closeOpenClawStateDatabaseAsync();
+      const sql = observeMainThreadSql();
+      try {
+        const entries = await listAcpSessionEntries({ cfg, env });
+        expect(entries.map((entry) => entry.sessionKey)).toEqual([sessionKey]);
+        sql.expectIdle();
+      } finally {
+        sql.restore();
+      }
+    });
+  });
 });

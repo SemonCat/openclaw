@@ -34,7 +34,6 @@ import { createDeferredCore } from "../../shared/deferred.js";
 import { createSuiteTempRootTracker } from "../../test-helpers/temp-dir.js";
 import { captureEnv, setTestEnvValue } from "../../test-utils/env.js";
 import { cleanupSessionStateForTest } from "../../test-utils/session-state-cleanup.js";
-import { createTestPreparedRunAdmission } from "../admitted-run-context.test-support.js";
 import { buildAgentRunTerminalOutcomeFromLifecycleEvent } from "../agent-run-terminal-outcome.js";
 import { createAuthProfileStoreFixture } from "../auth-profiles/credential-fixtures.test-support.js";
 import { clearRuntimeAuthProfileStoreSnapshots } from "../auth-profiles/runtime-snapshots.js";
@@ -53,7 +52,6 @@ import { FailoverError } from "../failover-error.js";
 import { GENERIC_EXTERNAL_RUN_FAILURE_TEXT } from "../failover/user-copy.js";
 import { LiveSessionModelSwitchError } from "../live-model-switch-error.js";
 import { resetGeneratedMediaTaskActivityForTests } from "../media-generation-activity.test-support.js";
-import type { ModelFallbackAttemptProvenance } from "../model-fallback.types.js";
 import { buildConfiguredModelCatalog } from "../model-selection-shared.js";
 import { resolveReplyExpectation } from "../reply-completion.js";
 import { installSessionPlacementAdmissionProvider } from "../session-placement-admission.js";
@@ -69,75 +67,17 @@ import {
 import {
   createCliImageCapabilityPlugins,
   resetCliAttemptFixtureDatabases,
+  makeRunAgentAttemptParams,
+  type RunAgentAttemptOverrides,
+  type RunAgentAttemptParams,
 } from "./attempt-execution.cli.test-support.js";
 import { runAgentAttempt as runAgentAttemptImpl } from "./attempt-execution.js";
 import { resolveClaudeCliProjectDirForWorkspace } from "./claude-cli-project-dir.js";
 import { resolveEmbeddedModelSelection } from "./model-selection.js";
 import { persistAcpTurnTranscript, persistCliTurnTranscript } from "./transcript-persistence.js";
 
-type RunAgentAttemptParams = Parameters<typeof runAgentAttemptImpl>[0];
 const runAgentAttempt = (params: RunAgentAttemptOverrides) =>
   runAgentAttemptImpl(makeRunAgentAttemptParams(params));
-
-type RunAgentAttemptOverrides = Omit<
-  Partial<RunAgentAttemptParams>,
-  | "agentDir"
-  | "modelRoutingProvenance"
-  | "opts"
-  | "runContext"
-  | "sessionEntry"
-  | "sessionKey"
-  | "workspaceDir"
-> & {
-  agentDir: RunAgentAttemptParams["agentDir"];
-  modelRoutingProvenance?: ModelFallbackAttemptProvenance;
-  sessionEntry: NonNullable<RunAgentAttemptParams["sessionEntry"]>;
-  sessionKey: NonNullable<RunAgentAttemptParams["sessionKey"]>;
-  workspaceDir: RunAgentAttemptParams["workspaceDir"];
-  opts?: Partial<RunAgentAttemptParams["opts"]>;
-  runContext?: Partial<RunAgentAttemptParams["runContext"]>;
-};
-
-function makeRunAgentAttemptParams(overrides: RunAgentAttemptOverrides): RunAgentAttemptParams {
-  const provider = overrides.providerOverride ?? "openai";
-  const model = overrides.modelOverride ?? "gpt-5.4";
-  const isFallbackRetry = overrides.isFallbackRetry ?? false;
-  const runId = overrides.runId ?? `run-${overrides.sessionEntry.sessionId}`;
-  const modelRoutingProvenance: ModelFallbackAttemptProvenance =
-    overrides.modelRoutingProvenance ?? {
-      requestedProvider: overrides.originalProvider ?? provider,
-      requestedModel: model,
-      stage: isFallbackRetry ? "fallback" : "initial",
-    };
-  return {
-    providerOverride: provider,
-    originalProvider: provider,
-    modelOverride: model,
-    cfg: {} as OpenClawConfig,
-    sessionId: overrides.sessionEntry.sessionId,
-    sessionAgentId: "main",
-    sessionFile: path.join(overrides.workspaceDir, "session.jsonl"),
-    body: "continue",
-    isFallbackRetry,
-    resolvedThinkLevel: "medium",
-    timeoutMs: 1_000,
-    runId,
-    spawnedBy: undefined,
-    messageChannel: undefined,
-    skillsSnapshot: undefined,
-    resolvedVerboseLevel: undefined,
-    onAgentEvent: vi.fn(),
-    authProfileProvider: provider,
-    sessionHasHistory: false,
-    ...overrides,
-    modelRoutingProvenance,
-    pluginGeneration: overrides.pluginGeneration,
-    preparedRunAdmission: overrides.preparedRunAdmission ?? createTestPreparedRunAdmission(runId),
-    lifecycleGeneration: overrides.lifecycleGeneration ?? getAgentEventLifecycleGeneration(),
-    opts: { ...overrides.opts } as RunAgentAttemptParams["opts"],
-    runContext: { ...overrides.runContext } as RunAgentAttemptParams["runContext"],
-  };
-}
 
 const runCliAgentMock = vi.hoisted(() => vi.fn());
 const runEmbeddedAgentMock = vi.hoisted(() => vi.fn());
@@ -3929,6 +3869,42 @@ describe("CLI attempt execution", () => {
       expect(embeddedArg.imageOrder).toEqual(expectedImages ? imageOrder : undefined);
     },
   );
+
+  it("preserves the objective in the embedded prompt after settled transcript fallback", async () => {
+    const originalBody = "perform the original side-effecting task";
+    const fallbackRuntimeState: NonNullable<RunAgentAttemptParams["fallbackRuntimeState"]> = {
+      originRuntime: "embedded",
+      continueFromSettledTranscript: true,
+    };
+
+    const embeddedArg = await runOpenClawEmbeddedAttemptForTest({
+      runId: "embedded-settled-transcript-fallback",
+      body: originalBody,
+      isFallbackRetry: true,
+      fallbackRuntimeState,
+    });
+
+    expect(embeddedArg.prompt).toContain("Continue from the current transcript");
+    expect(embeddedArg.prompt).toContain("Original user request");
+    expect(embeddedArg.prompt).toContain(originalBody);
+    expect(embeddedArg.skipPreparedUserTurnMessage).toBe(true);
+  });
+
+  it("lets an embedded attempt arm continuation for the next fallback model", async () => {
+    const fallbackRuntimeState: NonNullable<RunAgentAttemptParams["fallbackRuntimeState"]> = {};
+    const embeddedArg = await runOpenClawEmbeddedAttemptForTest({
+      runId: "embedded-arm-settled-transcript-fallback",
+      fallbackRuntimeState,
+    });
+
+    const armContinuation = embeddedArg.onSettledTranscriptModelFallback;
+    expect(armContinuation).toEqual(expect.any(Function));
+    if (typeof armContinuation !== "function") {
+      throw new Error("expected settled transcript fallback callback");
+    }
+    armContinuation();
+    expect(fallbackRuntimeState.continueFromSettledTranscript).toBe(true);
+  });
 
   it("records raw CLI-shaped model runs as embedded origins", async () => {
     const images = [{ type: "image" as const, data: "aGVsbG8=", mimeType: "image/png" }];

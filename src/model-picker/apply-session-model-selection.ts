@@ -67,6 +67,9 @@ export type ApplySessionModelSelectionParams = {
   allowCreate?: boolean;
   defaultProvider: string;
   defaultModel: string;
+  /** Effective default for this session after channel/thread routing policy. */
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   currentProvider: string;
   currentModel: string;
   modelPolicy?: Omit<ModelVisibilityPolicy, "catalog">;
@@ -216,6 +219,11 @@ export async function applySessionModelSelectionInternal(
   const operatorAuthority = params.operatorAuthority ?? operatorScope?.authority;
 
   const resetToDefault = params.request.resetToDefault === true;
+  const configuredDefault = resetToDefault
+    ? resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId })
+    : { provider: params.defaultProvider, model: params.defaultModel };
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? configuredDefault.provider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? configuredDefault.model;
   const policy =
     params.modelPolicy ??
     createModelVisibilityPolicy({
@@ -230,7 +238,7 @@ export async function applySessionModelSelectionInternal(
         cfg: params.cfg,
         agentId: params.agentId,
         policy: operatorAuthority?.modelPolicy,
-        model: resolveDefaultModelForAgent({ cfg: params.cfg, agentId: params.agentId }),
+        model: { provider: sessionDefaultProvider, model: sessionDefaultModel },
         allows: policy.allows,
       })
     : params.request;
@@ -258,12 +266,11 @@ export async function applySessionModelSelectionInternal(
     model: selectedRef.model,
     isDefault:
       resetToDefault ||
-      normalizedModelKey === modelKey(params.defaultProvider, params.defaultModel),
+      normalizedModelKey === modelKey(sessionDefaultProvider, sessionDefaultModel),
   };
   if (!resetToDefault && !policy.allows(request)) {
     return rejectNotAllowed(request.provider, request.model);
   }
-
   const prepared = await prepareModelSelectionRuntime({
     cfg: params.cfg,
     agentId: params.agentId,

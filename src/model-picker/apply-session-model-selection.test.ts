@@ -414,6 +414,153 @@ describe("applySessionModelSelection", () => {
     expect(draft.agents.entries.main.model).toBe("openai/gpt-4o");
   });
 
+  it.each([
+    {
+      name: "clears overrides for an authoritative default",
+      request: {
+        provider: "anthropic",
+        model: "claude-opus-4-6",
+        isDefault: false,
+        runtime: { kind: "unchanged" } as const,
+      },
+      expectedOverride: undefined,
+    },
+    {
+      name: "persists an authoritative non-default",
+      request: {
+        provider: "openai",
+        model: "gpt-4o",
+        isDefault: true,
+        runtime: { kind: "unchanged" } as const,
+      },
+      expectedOverride: "gpt-4o",
+    },
+  ])("$name instead of trusting request.isDefault", async ({ request, expectedOverride }) => {
+    const sessionEntry = createEntry({
+      providerOverride: "openai",
+      modelOverride: "gpt-4o",
+      modelOverrideSource: "user",
+      modelOverrideRouteResolution: "resolved",
+    });
+    await applySessionModelSelection(createParams({ sessionEntry, request }));
+    expect(sessionEntry.modelOverride).toBe(expectedOverride);
+  });
+
+  it("uses the effective session default when classifying an explicit selection", async () => {
+    const sessionEntry = createEntry();
+
+    await applySessionModelSelection(
+      createParams({
+        sessionEntry,
+        sessionDefaultProvider: "openai",
+        sessionDefaultModel: "gpt-4o",
+        request: {
+          provider: "anthropic",
+          model: "claude-opus-4-6",
+          isDefault: true,
+          runtime: { kind: "unchanged" },
+        },
+      }),
+    );
+
+    expect(sessionEntry).toMatchObject({
+      providerOverride: "anthropic",
+      modelOverride: "claude-opus-4-6",
+      modelOverrideSource: "user",
+    });
+  });
+
+  it("clears overrides when resetting to the effective session default", async () => {
+    const sessionEntry = createEntry({
+      providerOverride: "anthropic",
+      modelOverride: "claude-opus-4-6",
+      modelOverrideSource: "user",
+      modelOverrideRouteResolution: "resolved",
+    });
+
+    await applySessionModelSelection(
+      createParams({
+        sessionEntry,
+        sessionDefaultProvider: "openai",
+        sessionDefaultModel: "gpt-4o",
+        request: {
+          provider: "openai",
+          model: "gpt-4o",
+          isDefault: false,
+          runtime: { kind: "unchanged" },
+        },
+      }),
+    );
+
+    expect(sessionEntry.providerOverride).toBeUndefined();
+    expect(sessionEntry.modelOverride).toBeUndefined();
+    expect(sessionEntry.modelOverrideSource).toBe("default");
+  });
+
+  it("does not persist an explicit selection of the effective session default", async () => {
+    const result = await applySessionModelSelection(
+      createParams({
+        canPersistStickyModelSelection: true,
+        sessionDefaultProvider: "openai",
+        sessionDefaultModel: "gpt-4o",
+        request: {
+          provider: "openai",
+          model: "gpt-4o",
+          isDefault: false,
+          runtime: { kind: "unchanged" },
+        },
+      }),
+    );
+
+    expect(result).not.toHaveProperty("configuredDefaultUpdate");
+    expect(effects.mutateConfigFileWithRetry).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    {
+      name: "set",
+      initial: undefined,
+      runtime: { kind: "set", runtime: "openclaw" } as const,
+      expected: "openclaw",
+      runtimeChange: { kind: "set", runtime: "openclaw" },
+      agentRuntime: "openclaw",
+    },
+    {
+      name: "clear",
+      initial: "openclaw",
+      runtime: { kind: "clear" } as const,
+      expected: undefined,
+      runtimeChange: { kind: "clear" },
+      agentRuntime: "codex",
+    },
+    {
+      name: "unchanged",
+      initial: "openclaw",
+      runtime: { kind: "unchanged" } as const,
+      expected: "openclaw",
+      runtimeChange: undefined,
+      agentRuntime: "openclaw",
+    },
+  ])(
+    "supports runtime $name",
+    async ({ initial, runtime, expected, runtimeChange, agentRuntime }) => {
+      const sessionEntry = createEntry({ agentRuntimeOverride: initial });
+      const result = await applySessionModelSelection(
+        createParams({
+          sessionEntry,
+          request: { provider: "openai", model: "gpt-4o", isDefault: false, runtime },
+        }),
+      );
+
+      expect(result.status).toBe("applied");
+      if (result.status === "applied") {
+        expect(result.runtimeChange).toEqual(runtimeChange);
+        expect(result.agentRuntime).toBe(agentRuntime);
+      }
+      expect(sessionEntry.agentRuntimeOverride).toBe(expected);
+    },
+  );
+
   it.each([undefined, "codex"])(
     "clears inherited but rejects explicit Gateway runtime %s",
     async (agentRuntime) => {

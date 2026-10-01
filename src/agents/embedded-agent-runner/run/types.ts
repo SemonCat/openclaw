@@ -467,6 +467,8 @@ export type EmbeddedRunAttemptResult = {
     completedCount: number;
     activeCount: number;
   };
+  /** Provider-terminalized calls whose synthetic failure results are included in this snapshot. */
+  terminalizedToolCalls?: ReadonlyArray<{ toolCallId: string; toolName: string }>;
   setTerminalLifecycleMeta?: (meta: {
     replayInvalid?: boolean;
     livenessState?: EmbeddedRunLivenessState;

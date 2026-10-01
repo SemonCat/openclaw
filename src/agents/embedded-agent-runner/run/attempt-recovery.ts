@@ -10,6 +10,7 @@ import { buildAssistantFailoverSignal } from "../../embedded-agent-helpers/assis
 import {
   findCliTerminalStopError,
   resolveFailoverClassificationFromError,
+  resolveFailoverReasonFromError,
 } from "../../failover-error.js";
 import { failoverReasonFromClassification } from "../../failover/classification-rules.js";
 import { classifyFailoverSignal } from "../../failover/classify.js";
@@ -22,7 +23,11 @@ import { log } from "../logger.js";
 import type { EmbeddedAgentRunResult, TraceAttempt } from "../types.js";
 import type { createUsageAccumulator } from "../usage-accumulator.js";
 import type { normalizeEmbeddedRunAttempt } from "./attempt-normalization.js";
-import { hasAsyncActivity, isCurrentAttemptReplaySafe } from "./attempt-terminal-evidence.js";
+import {
+  hasAsyncActivity,
+  hasAttemptTerminalState,
+  isCurrentAttemptReplaySafe,
+} from "./attempt-terminal-evidence.js";
 import { buildEmbeddedRunBlockedResult } from "./blocked-run-result.js";
 import { resolveCodexAppServerRecoveryRetry } from "./codex-app-server-recovery.js";
 import { resolveCompactionLiveModelSelection } from "./compaction-live-model-selection.js";
@@ -187,6 +192,40 @@ export async function recoverEmbeddedRunAttempt(input: {
   // code-mode run registry and resumes through `wait`, exactly as across turns.
   const midTurnBatchSettled =
     settledEvidence.allToolsProvenSettled || settledEvidence.parkedCodeModeRun;
+  // Failed results need closed lifecycle proof; the parked-run exception is
+  // only safe for a successful Code Mode result that the model can resume via wait.
+  const transportBatchSettled =
+    settledEvidence.allToolsProvenSettled ||
+    (settledEvidence.failedToolNames.size === 0 && settledEvidence.parkedCodeModeRun);
+  // Codex may append synthetic failures for earlier accepted batches after the
+  // latest real result. Only typed rate-limit continuation consumes that proof;
+  // generic recovery retains the strict current-batch lifecycle gate above.
+  const rateLimitBatchSettled =
+    transportBatchSettled ||
+    settledEvidence.settledWithLateSyntheticPriorResults ||
+    settledEvidence.settledWithTerminalizedToolResults;
+  const rateLimitToolErrorSettled =
+    !settledEvidence.hasUnsettledToolError ||
+    ((settledEvidence.settledWithLateSyntheticPriorResults ||
+      settledEvidence.settledWithTerminalizedToolResults) &&
+      Boolean(
+        attempt.lastToolError &&
+        (settledEvidence.failedToolNames.has(attempt.lastToolError.toolName) ||
+          settledEvidence.lateSyntheticPriorFailureNames.has(attempt.lastToolError.toolName)),
+      ));
+  const settledRateLimitPromptFailure = Boolean(
+    !currentAttemptReplaySafe &&
+    promptError &&
+    promptErrorSource === "prompt" &&
+    !aborted &&
+    !timedOut &&
+    !terminalInterrupted &&
+    !hasAttemptTerminalState({ ...attempt, lastToolError: undefined }) &&
+    rateLimitToolErrorSettled &&
+    !hasAsyncActivity(attempt.toolMetas) &&
+    rateLimitBatchSettled &&
+    resolveFailoverReasonFromError(promptError, preparedRuntime.provider) === "rate_limit",
+  );
   const canContinueSettledMidTurnOverflow =
     promptErrorSource === "precheck" &&
     attempt.preflightRecovery?.source === "mid-turn" &&
@@ -439,7 +478,8 @@ export async function recoverEmbeddedRunAttempt(input: {
   if (
     !currentAttemptReplaySafe &&
     !canContinueSettledMidTurnOverflow &&
-    !canRecoverSettledToolResults
+    !canRecoverSettledToolResults &&
+    !settledRateLimitPromptFailure
   ) {
     recordRecoveryDecision("rejected", "replay_unsafe");
     return { action: "proceed" };
@@ -483,8 +523,9 @@ export async function recoverEmbeddedRunAttempt(input: {
       }),
     };
   }
-  // Profile rotation and original-prompt replay still require replay-safe evidence.
-  if (!currentAttemptReplaySafe) {
+  // Typed rate-limit recovery may rotate auth while continuing after settled
+  // tools. Every other profile rotation or original-prompt replay remains closed.
+  if (!currentAttemptReplaySafe && !settledRateLimitPromptFailure) {
     recordRecoveryDecision("rejected", "replay_unsafe");
     return { action: "proceed" };
   }
@@ -550,10 +591,28 @@ export async function recoverEmbeddedRunAttempt(input: {
       getThinkLevel: () => preparedRuntime.snapshot().thinkLevel,
       traceAttempts: input.traceAttempts,
       previousRetryFailoverReason: input.lastRetryFailoverReason,
+    }).catch((error: unknown) => {
+      if (
+        settledRateLimitPromptFailure &&
+        resolveFailoverReasonFromError(error, preparedRuntime.provider) === "rate_limit"
+      ) {
+        // Outer model fallback must continue from the settled tool boundary;
+        // replaying the original turn would duplicate completed side effects.
+        params.onSettledTranscriptModelFallback?.();
+      }
+      throw error;
     });
     if (promptFailureOutcome.action === "complete") {
       recordRecoveryDecision("rejected", "prompt_failure");
       return { action: "complete", result: promptFailureOutcome.result };
+    }
+    if (settledRateLimitPromptFailure) {
+      sessionPromptState.markOwnedTranscriptRetry();
+      sessionPromptState.continueFromCurrentTranscript({
+        includeToolFailureInstruction:
+          settledEvidence.failedToolNames.size > 0 ||
+          settledEvidence.lateSyntheticPriorFailureNames.size > 0,
+      });
     }
     preparedRuntime.setThinkLevel(promptFailureOutcome.thinkLevel);
     recordRecoveryDecision("accepted", "prompt_recovery");

@@ -19,6 +19,10 @@ import {
   formatRelativeDuration,
   formatResetDuration,
 } from "./rate-limit-time.js";
+import {
+  CODEX_USAGE_LIMIT_MESSAGE_PREFIX,
+  extractCodexResetHint,
+} from "./usage-limit-reset-hint.js";
 
 const CODEX_LIMIT_ID = "codex";
 // Codex exposes Reserve as a distinct backend-authorized route, not ordinary Luna usage.
@@ -30,7 +34,6 @@ const ONE_DAY_MS = 24 * 60 * 60_000;
 const DAY_WINDOW_MINUTES = 24 * 60;
 const WEEKLY_WINDOW_MINUTES = 7 * DAY_WINDOW_MINUTES;
 const WEEKLY_RESET_GAP_MS = 3 * ONE_DAY_MS;
-const CODEX_USAGE_LIMIT_MESSAGE_PREFIX = "You've reached your Codex subscription usage limit.";
 const CODEX_USAGE_LIMIT_STATE_MISMATCH_MESSAGE =
   "Codex rejected the request with a usage-limit error, but its current account usage does not report an exhausted limit.";
 
@@ -108,6 +111,9 @@ export function formatCodexUsageLimitErrorMessage(params: {
     return undefined;
   }
   const nowMs = params.nowMs ?? Date.now();
+  const hasAuthoritativeRateLimitSnapshots = Boolean(
+    params.rateLimitsAuthoritative && hasCodexRateLimitSnapshots(params.rateLimits),
+  );
   const ordinaryUsageAllowed = readOrdinaryUsageAllowed(params.rateLimits);
   const snapshots = collectCodexRateLimitSnapshots(params.rateLimits).filter(
     snapshotHasDisplayableData,
@@ -141,10 +147,10 @@ export function formatCodexUsageLimitErrorMessage(params: {
     parts.push(`Next reset ${formatResetTime(nextReset.resetsAtMs, nowMs)}.`);
     recoveryAction = "Wait until the reset time";
   } else {
-    const codexRetryHint = extractCodexRetryHint(message);
-    if (codexRetryHint) {
-      parts.push(`Codex says to try again ${codexRetryHint}.`);
-      recoveryAction = "Wait until the retry time";
+    const codexResetHint = extractCodexResetHint(message, !hasAuthoritativeRateLimitSnapshots);
+    if (codexResetHint) {
+      parts.push(`${codexResetHint[0]}.`);
+      recoveryAction = codexResetHint[1];
     } else {
       if (usageSummary?.blockingPeriod && usageSummary.blockingReason) {
         parts.push(`Your ${usageSummary.blockingReason}.`);
@@ -661,18 +667,4 @@ function hasWeeklySecondaryResetCadence(
     entry.window.resetsAtMs > 0 &&
     entry.window.resetsAtMs - primaryResetMs >= WEEKLY_RESET_GAP_MS
   );
-}
-
-function extractCodexRetryHint(message: string | undefined): string | undefined {
-  if (!message) {
-    return undefined;
-  }
-  const tryAgainAt = /\btry again\s+(at\s+[^.!?\n]+)(?:[.!?]|$)/iu.exec(message);
-  if (tryAgainAt?.[1]) {
-    return tryAgainAt[1].trim();
-  }
-  const tryAgainRelative = /\btry again\s+((?:tomorrow|in\s+[^.!?\n]+)[^.!?\n]*)(?:[.!?]|$)/iu.exec(
-    message,
-  );
-  return tryAgainRelative?.[1]?.trim();
 }
