@@ -48,6 +48,8 @@ export type AgentRuntimeIdentity = {
   sessionKey: string;
   operationalRunInstance: OperationalRunInstanceRef;
   delegatedAuthority: AgentRuntimeDelegatedAuthority;
+  /** Host-prepared setup permission; only an explicit true can bypass human approval. */
+  fullPermission?: boolean;
   approvalOwnerPluginId?: string;
   executionIdentity?: ExecutionIdentityAdmissionToken;
   turnSourceChannel?: string;
@@ -214,6 +216,7 @@ const agentRuntimeIdentityTokenPayloadSchema = z.object({
   sessionKey: z.string(),
   operationalRunInstance: operationalRunInstanceSchema,
   delegatedAuthority: delegatedAuthoritySchema,
+  fullPermission: z.boolean().optional(),
   approvalOwnerPluginId: z.string().optional().catch(undefined),
   executionIdentity: z.unknown().optional(),
   turnSourceChannel: z.string().optional().catch(undefined),
@@ -398,6 +401,7 @@ function parsePayload(value: unknown, nowMs: number): AgentRuntimeIdentityTokenP
       sessionKey,
       operationalRunInstance,
       delegatedAuthority,
+      ...(raw.fullPermission !== undefined ? { fullPermission: raw.fullPermission } : {}),
       ...(approvalOwnerPluginId ? { approvalOwnerPluginId } : {}),
       ...(turnSourceChannel ? { turnSourceChannel } : {}),
       ...(turnSourceLocal ? { turnSourceLocal } : {}),
@@ -426,6 +430,7 @@ export type AgentRuntimeIdentityTokenParams = {
   agentId: string;
   sessionKey: string;
   operationalRunInstance: OperationalRunInstanceRef;
+  fullPermission?: boolean;
   approvalOwnerPluginId?: string;
   executionIdentityToken?: ExecutionIdentityAdmissionToken;
   turnSourceChannel?: string;
@@ -541,6 +546,7 @@ function prepareAgentRuntimeIdentityTokenPayload(
       runId: operationalRunId,
     },
     delegatedAuthority,
+    ...(params.fullPermission !== undefined ? { fullPermission: params.fullPermission } : {}),
     ...(normalizeOptionalString(params.approvalOwnerPluginId)
       ? { approvalOwnerPluginId: normalizeOptionalString(params.approvalOwnerPluginId) }
       : {}),

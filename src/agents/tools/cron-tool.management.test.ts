@@ -129,7 +129,7 @@ describe("admin automation management", () => {
 
   it("advertises only admitted management actions and inputs", async () => {
     await withAdminTool("unknown", async (tool) => {
-      const actions = ["list", "get", "update", "run", "remove"];
+      const actions = ["list", "get", "runs", "update", "run", "remove"];
       expect(tool.parameters).toHaveProperty("properties.action.enum", actions);
       for (const key of ["in", "text", "mode", "contextMessages", "sessionKey"]) {
         expect(tool.parameters).not.toHaveProperty(`properties.${key}`);

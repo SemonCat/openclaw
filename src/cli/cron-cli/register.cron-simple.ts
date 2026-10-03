@@ -6,10 +6,12 @@ import {
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import { Option, type Command } from "commander";
 import { resolveCronCompletionStatus } from "../../cron/completion-status.js";
+import {
+  CronRunWaitTimeoutError,
+  waitForCronRunCompletion,
+} from "../../cron/run-completion-wait.js";
 import type { CronRunLogEntry } from "../../cron/run-log-types.js";
 import { defaultRuntime } from "../../runtime.js";
-import { sleep } from "../../utils/sleep.js";
-import type { GatewayRpcOpts } from "../gateway-rpc.js";
 import { addGatewayClientOptions, callGatewayFromCli } from "../gateway-rpc.js";
 import { exitCliAfterOutput } from "../one-shot-exit.js";
 import { parseDurationMs } from "../parse-duration.js";
@@ -61,46 +63,6 @@ function parseCronRunPollInterval(raw: unknown): number {
     throw new CronCliError("invalid --poll-interval");
   }
   return resolvePositiveTimerTimeoutMs(durationMs, 2_000);
-}
-
-async function waitForCronRunCompletion(params: {
-  opts: GatewayRpcOpts;
-  jobId: string;
-  runId: string;
-  timeoutMs: number;
-  pollIntervalMs: number;
-}): Promise<CronRunLogEntry> {
-  // Poll the task ledger rather than cron.run because completion state is written asynchronously.
-  const startedAt = performance.now();
-  let hasPolled = false;
-  for (;;) {
-    const elapsedBeforePollMs = Math.floor(performance.now() - startedAt);
-    if (hasPolled && elapsedBeforePollMs >= params.timeoutMs) {
-      throw new CronCliError(`timed out waiting for cron run ${params.runId}`);
-    }
-    const remainingMs = Math.max(1, params.timeoutMs - elapsedBeforePollMs);
-    const configuredTimeoutMs = parseTimeoutMs(params.opts.timeout);
-    const pollTimeoutMs =
-      configuredTimeoutMs === undefined ? remainingMs : Math.min(configuredTimeoutMs, remainingMs);
-    hasPolled = true;
-    // History reads share the wait deadline, but enqueue keeps its own RPC
-    // timeout and a zero-duration wait still gets one immediate ledger poll.
-    const pollOpts = { ...params.opts, timeout: String(pollTimeoutMs) };
-    const page = (await callGatewayFromCli("cron.runs", pollOpts, {
-      id: params.jobId,
-      runId: params.runId,
-      limit: 1,
-    })) as { entries?: CronRunLogEntry[] };
-    const entry = page.entries?.[0];
-    if (entry?.status === "ok" || entry?.status === "error" || entry?.status === "skipped") {
-      return entry;
-    }
-    const elapsedMs = Math.floor(performance.now() - startedAt);
-    if (elapsedMs >= params.timeoutMs) {
-      throw new CronCliError(`timed out waiting for cron run ${params.runId}`);
-    }
-    await sleep(Math.min(params.pollIntervalMs, params.timeoutMs - elapsedMs));
-  }
 }
 
 export function registerCronSimpleCommands(cron: Command) {
@@ -259,12 +221,33 @@ export function registerCronSimpleCommands(cron: Command) {
             if (!result.runId) {
               throw new Error("cron run did not return a runId to wait for");
             }
-            const run = await waitForCronRunCompletion({
-              opts,
-              jobId: id,
-              runId: result.runId,
+            const runId = result.runId;
+            const { entry: run } = await waitForCronRunCompletion({
+              runId,
               timeoutMs: waitTimeoutMs,
               pollIntervalMs,
+              readPage: async (remainingMs) => {
+                const configuredTimeoutMs = parseTimeoutMs(opts.timeout);
+                const timeout = String(
+                  configuredTimeoutMs === undefined
+                    ? remainingMs
+                    : Math.min(configuredTimeoutMs, remainingMs),
+                );
+                return (await callGatewayFromCli(
+                  "cron.runs",
+                  { ...opts, timeout },
+                  {
+                    id,
+                    runId,
+                    limit: 1,
+                  },
+                )) as { entries?: CronRunLogEntry[] };
+              },
+            }).catch((error: unknown) => {
+              if (error instanceof CronRunWaitTimeoutError) {
+                throw new CronCliError(error);
+              }
+              throw error;
             });
             const completionStatus =
               run.completionStatus ??

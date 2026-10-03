@@ -218,12 +218,10 @@ async function fixture(state: OpenClawTestState, owner: Owner, empty = false) {
     },
     provider,
     modelId: "synthetic-model",
-    globalLane: "inline-auth-failure-test",
     agentDir,
     fallbackConfigured: false,
     profileFailureStore: store,
     getLastProfileId: () => undefined,
-    getSessionId: () => "inline-auth-failure-session",
     harnessOwnsTransport: () => false,
     getRuntimeAuthOwnerId: () => "embedded",
     getApiKeyInfo: () => ({

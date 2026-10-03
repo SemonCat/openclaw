@@ -62,6 +62,21 @@ describe("failover user copy", () => {
     ).toBe("⚠️ rate limit: service overloaded, try again in 30 seconds");
   });
 
+  it("keeps enriched rate-limit copy idempotent across repeated rendering", () => {
+    const raw =
+      "You've reached your Codex subscription usage limit. Next reset in 4 hours, Sep 8 at 7:59 PM GMT+8. Wait until the reset time, use another Codex account if available, or switch to another configured model/provider.";
+    const expected = `⚠️ ${raw}`;
+    const rendered = renderRateLimitOrOverloadedCopy({ reason: "rate_limit", raw });
+    const sanitized = renderSanitizedUserFacingText(rendered, { errorContext: true });
+    const renderedAgain = renderRateLimitOrOverloadedCopy({
+      reason: "rate_limit",
+      raw: sanitized,
+    });
+
+    expect([rendered, sanitized, renderedAgain]).toEqual([expected, expected, expected]);
+    expect(renderSanitizedUserFacingText(`⚠️ ⚠️ ⚠️ ${raw}`, { errorContext: true })).toBe(expected);
+  });
+
   it.each([
     "Error: 400 max_tokens (384000) exceeds model's maximum output tokens (65536)",
     "OpenAI API error (400): max_output_tokens (384000) exceeds model's maximum output tokens (65536)",

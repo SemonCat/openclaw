@@ -54,7 +54,7 @@ import {
   createAgentAttemptLifecycleCallbacks,
   type AgentAttemptLifecycleState,
 } from "./attempt-callbacks.js";
-import { persistAgentSession } from "./attempt-execution.shared.js";
+import { type AgentFallbackRuntimeState, persistAgentSession } from "./attempt-execution.shared.js";
 import { createCommandCompactionAccounting } from "./compaction-accounting.js";
 import { createAgentCommandLifecycle } from "./lifecycle.js";
 import type { RunEmbeddedAgentAttemptParams } from "./run-embedded-attempt.types.js";
@@ -267,7 +267,7 @@ export async function runEmbeddedAgentAttempt(params: RunEmbeddedAgentAttemptPar
               : hasStoredAutoFallbackProvenance,
           }));
 
-      const fallbackRuntimeState: { originRuntime?: "cli" | "embedded" } = {};
+      const fallbackRuntimeState: AgentFallbackRuntimeState = {};
       attemptLifecycleState.currentTurnUserMessagePersisted = false;
       let attemptMediaTaskIds = liveSwitchMediaTaskIds;
       const currentAttemptCommittedCronMedia = () =>

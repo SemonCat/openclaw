@@ -174,6 +174,14 @@ export abstract class CodexTurnProjection {
     const observedItemCount = new Set([...this.observedItemIds, ...this.completedItemIds]).size;
     const activeItemCount = this.activeItemIds.size;
     const completedItemCount = this.completedItemIds.size;
+    // Codex emits TurnComplete only after its task body returns. A typed usage
+    // limit therefore terminalizes accepted native commands whose completion
+    // notification was lost, while other active item kinds remain fail-closed.
+    const terminalizedCommandCandidates =
+      completedTurn?.status === "failed" &&
+      completedTurn.error?.codexErrorInfo === "usageLimitExceeded"
+        ? this.nativeToolLifecycleProjector.activeCommandExecutions()
+        : [];
     const guardianReviewCount = this.eventProjection.guardianReviewCount;
     const yieldDetected = options?.yieldDetected;
     const retainedCommands = new Map<string, string>();
@@ -224,6 +232,9 @@ export abstract class CodexTurnProjection {
       });
     const storedMissingToolResultError =
       synthesizedMissingToolResultError ?? previousMissingToolResultError;
+    const terminalizedToolCalls = terminalizedCommandCandidates.filter(({ toolCallId }) =>
+      this.toolTranscriptProjection.hasSyntheticMissingToolResult(toolCallId),
+    );
     let promptErrorSource = initialPromptErrorSource;
     if (synthesizedMissingToolResultError) {
       this.synthesizedMissingToolResultError = synthesizedMissingToolResultError;
@@ -336,6 +347,11 @@ export abstract class CodexTurnProjection {
         completedCount: completedItemCount,
         activeCount: activeItemCount,
       },
+      ...(terminalizedToolCalls.length > 0
+        ? {
+            terminalizedToolCalls,
+          }
+        : {}),
       yieldDetected: yieldDetected || false,
       didSendDeterministicApprovalPrompt: guardianReviewCount > 0 ? false : undefined,
     };

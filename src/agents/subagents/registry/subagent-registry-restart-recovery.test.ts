@@ -143,6 +143,25 @@ describe("subagent registry restart recovery", () => {
     },
   );
 
+  it("replays interrupted terminal failures only until cleanup is complete", async () => {
+    const endedAt = Date.now();
+    const entry = run({
+      terminalOwner: "interrupted-recovery",
+      endedReason: "subagent-error",
+      execution: {
+        status: "terminal",
+        endedAt,
+        outcome: { status: "error", error: "saved exact failure" },
+      },
+    });
+    await expect(recover(entry)).resolves.toMatchObject({ status: "terminal" });
+    entry.cleanupCompletedAt = endedAt;
+    entry.cleanupHandled = true;
+    await expect(recover(entry)).resolves.toEqual({ status: "ignored" });
+    expect(dispatchAgent).not.toHaveBeenCalled();
+    expect(mocks.patchSessionEntryCore).not.toHaveBeenCalled();
+  });
+
   it("preserves an abort marker owned by a newer visible execution", async () => {
     mocks.entries[childSessionKey]!.lifecycleRunId = "newer-visible-run";
 

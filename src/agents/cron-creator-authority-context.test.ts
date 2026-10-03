@@ -145,6 +145,7 @@ describe("bindCronManagementGrant", () => {
             for (const method of [
               "cron.list",
               "cron.get",
+              "cron.runs",
               "cron.update",
               "cron.run",
               "cron.remove",
@@ -169,7 +170,7 @@ describe("bindCronManagementGrant", () => {
                 "Automation creation is not granted",
               );
             }
-            for (const method of ["cron.add", "cron.status", "cron.runs", "wake"]) {
+            for (const method of ["cron.add", "cron.status", "wake"]) {
               if (kind === "local") {
                 expect(mint(method)).toBeUndefined();
               } else {
