@@ -894,6 +894,23 @@ describe("OpenAI-compatible completions compatibility", () => {
     expect(result.errorMessage).toBe("502: gateway maintenance");
   });
 
+  it("preserves cancellation when a compatible provider also reports cyber_policy", async () => {
+    const abort = new AbortController();
+    mockOpenAI.nextError = Object.assign(new Error("The provider declined this request."), {
+      code: "cyber_policy",
+      type: "invalid_request_error",
+    });
+
+    const result = await streamOpenAICompletions(baseModel, context, {
+      apiKey: "test",
+      signal: abort.signal,
+      onPayload: () => abort.abort(),
+    }).result();
+
+    expect(result).toMatchObject({ stopReason: "aborted", errorCode: "cyber_policy" });
+    expect(result.diagnostics?.some((entry) => entry.type === "provider_refusal")).not.toBe(true);
+  });
+
   it("redacts OpenRouter terminal body and raw metadata from one error projection", async () => {
     const media = "QUJDRA==";
     mockOpenAI.nextError = Object.assign(new Error("400 status code (no body)"), {

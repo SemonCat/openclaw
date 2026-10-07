@@ -9,6 +9,7 @@ import {
 } from "../provider-options.js";
 import { resolveCacheRetention } from "../providers/cache-retention.js";
 import { finalizeOpenAICompletionsToolCalls } from "../providers/openai-completions-tool-calls.js";
+import { recordOpenAICyberPolicyRefusal } from "../providers/openai-provider-refusal.js";
 import { tagUnresolvedTextAsCommentary } from "../utils/assistant-text-phase.js";
 import {
   createFirstStreamEventAbortController,
@@ -316,6 +317,7 @@ export function createOpenAICompletionsTransportStreamFn(): StreamFn {
           error,
           cleanup: () => {
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
+            recordOpenAICyberPolicyRefusal(output);
             finalizeOpenAICompletionsToolCalls(output, { allowSilentToolCallPromotion: false });
             tagUnresolvedTextAsCommentary(output);
           },

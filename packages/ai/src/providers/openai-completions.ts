@@ -43,6 +43,7 @@ import { resolveCacheRetention } from "./cache-retention.js";
 import { buildCopilotDynamicHeaders, hasCopilotVisionInput } from "./github-copilot-headers.js";
 import { finalizeOpenAICompletionsToolCalls } from "./openai-completions-tool-calls.js";
 import { createOpenAIProviderClient } from "./openai-provider-client.js";
+import { recordOpenAICyberPolicyRefusal } from "./openai-provider-refusal.js";
 import { buildBaseOptions } from "./simple-options.js";
 
 export type { OpenAICompletionsOptions } from "../provider-options.js";
@@ -201,6 +202,7 @@ export const streamOpenAICompletions: StreamFunction<
       stream.end();
     } catch (error) {
       const terminal = assignTransportErrorDetails(output, error, options?.signal);
+      recordOpenAICyberPolicyRefusal(output);
       finalizeOpenAICompletionsToolCalls(output, { allowSilentToolCallPromotion: false });
       clearPendingCommentaryText(provisionalCommentaryTags);
       tagUnresolvedTextAsCommentary(output);
