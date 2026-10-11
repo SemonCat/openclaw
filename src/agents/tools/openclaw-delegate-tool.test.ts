@@ -39,15 +39,19 @@ describe("openclaw delegation tool", () => {
 
     const result = await tool.execute("call-1", { message: "Add channel." });
 
-    expect(callGateway).toHaveBeenCalledWith("openclaw.chat", {
-      sessionId: expect.stringMatching(/^delegate-[a-f0-9]{32}$/),
-      message: "Add channel.",
-      delegation: {
-        agentId: "main",
-        sessionKey: "agent:main:dm:one",
-        turnSourceChannel: "webchat",
+    expect(callGateway).toHaveBeenCalledWith(
+      "openclaw.chat",
+      {
+        sessionId: expect.stringMatching(/^delegate-[a-f0-9]{32}$/),
+        message: "Add channel.",
+        delegation: {
+          agentId: "main",
+          sessionKey: "agent:main:dm:one",
+          turnSourceChannel: "webchat",
+        },
       },
-    });
+      { timeoutMs: 900_000 },
+    );
     expect(result.details).toEqual({
       reply: "Applied.",
     });

@@ -8,7 +8,10 @@ import {
 } from "./session-meta-keys.js";
 import { captureAcpSessionReadContext } from "./session-meta-read-context.js";
 import { rowToAcpSessionMeta } from "./session-meta-readonly.js";
-import { resolveSessionStorePathForAcp, type AcpSessionStoreEntry } from "./session-meta-store.js";
+import {
+  resolveListableSessionStorePathForAcp,
+  type AcpSessionStoreEntry,
+} from "./session-meta-store.js";
 
 /** Join ACP metadata through the existing shared-state and physical session readers. */
 export async function listAcpSessionEntries(params: {
@@ -33,12 +36,16 @@ export async function listAcpSessionEntries(params: {
   for (const row of result.rows) {
     for (const identity of parseAcpDatabaseSessionKeyCandidates(row.session_key)) {
       const sessionKey = identity.storeSessionKey;
-      const { agentId, storePath } = resolveSessionStorePathForAcp({
+      const storeOwner = resolveListableSessionStorePathForAcp({
         sessionKey,
         agentId: identity.agentId,
         cfg,
         env,
       });
+      if (!storeOwner) {
+        continue;
+      }
+      const { agentId, storePath } = storeOwner;
       const storeSessionKey = normalizeStoreSessionKey(sessionKey);
       if (!storePath || !storeSessionKey) {
         continue;

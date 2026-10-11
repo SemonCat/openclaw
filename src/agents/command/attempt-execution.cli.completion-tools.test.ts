@@ -18,6 +18,7 @@ import { clearRuntimeAuthProfileStoreSnapshots } from "../auth-profiles/runtime-
 import { testing as cliBackendsTesting } from "../cli-backends.test-support.js";
 import { buildCliMcpGrantContext } from "../cli-runner/mcp-grant-context.js";
 import type { RunCliAgentParams } from "../cli-runner/types.js";
+import type { RunEmbeddedAgentInternalParams } from "../embedded-agent-runner/run/internal-params.js";
 import {
   createSubagentAnnounceHandoffOptions,
   createSubagentAnnounceSessionStore,
@@ -32,7 +33,9 @@ import {
 import { runAgentAttempt as runAgentAttemptImpl } from "./attempt-execution.js";
 
 const runCliAgentMock = vi.hoisted(() => vi.fn());
-const runEmbeddedAgentMock = vi.hoisted(() => vi.fn());
+const runEmbeddedAgentMock = vi.hoisted(() =>
+  vi.fn<(params: RunEmbeddedAgentInternalParams) => Promise<{ meta: { durationMs: number } }>>(),
+);
 
 vi.mock("../cli-runner.js", () => ({ runCliAgent: runCliAgentMock }));
 vi.mock("../embedded-agent.js", () => ({ runEmbeddedAgent: runEmbeddedAgentMock }));
@@ -140,6 +143,43 @@ describe("CLI completion tool handoffs", () => {
   ) {
     return runAgentAttempt({ workspaceDir: tmpDir, agentDir, storePath, ...overrides });
   }
+
+  it("preserves the objective in the embedded prompt after settled transcript fallback", async () => {
+    const sessionKey = "agent:main:settled-fallback";
+    const sessionEntry = makeSessionEntry("settled-fallback");
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await writeSessionStoreSeed(sessionStore);
+    runEmbeddedAgentMock.mockResolvedValue({ meta: { durationMs: 1 } });
+    const originalBody = "perform the original side-effecting task";
+    await runStoredAttempt({
+      sessionKey,
+      sessionEntry,
+      sessionStore,
+      body: originalBody,
+      isFallbackRetry: true,
+      fallbackRuntimeState: { originRuntime: "embedded", continueFromSettledTranscript: true },
+    });
+    const embeddedArg = runEmbeddedAgentMock.mock.calls[0]?.[0];
+    expect(embeddedArg?.prompt).toContain("Continue from the current transcript");
+    expect(embeddedArg?.prompt).toContain("Original user request");
+    expect(embeddedArg?.prompt).toContain(originalBody);
+    expect(embeddedArg?.skipPreparedUserTurnMessage).toBe(true);
+  });
+
+  it("lets an embedded attempt arm continuation for the next fallback model", async () => {
+    const sessionKey = "agent:main:arm-fallback";
+    const sessionEntry = makeSessionEntry("arm-fallback");
+    const sessionStore = { [sessionKey]: sessionEntry };
+    await writeSessionStoreSeed(sessionStore);
+    runEmbeddedAgentMock.mockResolvedValue({ meta: { durationMs: 1 } });
+    const fallbackRuntimeState: NonNullable<RunAgentAttemptOverrides["fallbackRuntimeState"]> = {};
+    await runStoredAttempt({ sessionKey, sessionEntry, sessionStore, fallbackRuntimeState });
+    const armContinuation =
+      runEmbeddedAgentMock.mock.calls[0]?.[0].onSettledTranscriptModelFallback;
+    expect(armContinuation).toEqual(expect.any(Function));
+    armContinuation?.();
+    expect(fallbackRuntimeState.continueFromSettledTranscript).toBe(true);
+  });
 
   it.each([
     { name: "a non-Claude CLI runtime", providerName: "google-gemini-cli", execHost: undefined },
