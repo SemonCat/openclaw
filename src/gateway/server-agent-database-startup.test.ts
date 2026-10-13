@@ -11,12 +11,13 @@ import {
   markPreparedModelRuntimeSnapshotsStale,
   refreshPreparedModelRuntimeSnapshots,
 } from "../agents/prepared-model-runtime.js";
-import { getRuntimeConfig } from "../config/io.js";
+import { getRuntimeConfig, setRuntimeConfigSnapshot } from "../config/io.js";
 import { resolveStateDir } from "../config/paths.js";
 import {
   persistSessionTranscriptTurn,
   upsertSessionEntryCore,
 } from "../config/sessions/session-accessor.js";
+import { readSessionEntryRow } from "../config/sessions/session-accessor.sqlite-entry-read.js";
 import { sessionTranscriptIndexNeedsReconcile } from "../config/sessions/session-transcript-index.js";
 import { waitForSessionTranscriptIndexReconcile } from "../config/sessions/session-transcript-reconcile.js";
 import { sqliteWorkerPreloadEnv } from "../infra/sqlite-worker-preload.test-support.js";
@@ -129,6 +130,7 @@ it.for([
   { outcome: "corrupt", agentId: "main" },
   { outcome: "startup-failure", agentId: "worker" },
   { outcome: "superseded", agentId: "worker" },
+  { outcome: "reconfigured", agentId: "worker" },
   { outcome: "shutdown-preparation", agentId: "worker" },
 ] as const)(
   "applies startup admission while $agentId follows its $outcome lifecycle",
@@ -501,6 +503,39 @@ it.for([
           restorationRelease.resolve();
           await server.startupSettled;
         }
+      } else if (outcome === "reconfigured") {
+        const current = getRuntimeConfig();
+        setRuntimeConfigSnapshot({
+          ...current,
+          session: {
+            ...current.session,
+            // Both configured roots must move; the default session store still owns the old DB.
+            store: path.join(root, "reconfigured", "{agentId}", "sessions", "sessions.json"),
+          },
+          agents: {
+            ...current.agents,
+            entries: {
+              ...current.agents?.entries,
+              worker: {
+                ...current.agents?.entries?.worker,
+                agentDir: path.join(root, "reconfigured-worker"),
+              },
+            },
+          },
+        });
+        fs.writeFileSync(releasePath, "resume");
+        await vi.waitFor(
+          () =>
+            expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
+              code: "agent-database-inspection-failed",
+              reason: `Agent ${agentId} database configuration changed during startup inspection`,
+            }),
+          { timeout: 10000 },
+        );
+        expect(fs.readFileSync(agentPath)).toEqual(agentBytes);
+        expect(() => openOpenClawAgentDatabase(scope)).toThrow(AgentDatabaseAdmissionError);
+        // Failed secondary agents remain isolated without blocking Gateway readiness.
+        expect((await fetch(`http://127.0.0.1:${port}/readyz`)).status).toBe(200);
       } else if (outcome === "corrupt") {
         expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toMatchObject({
           code: "agent-database-inspection-failed",
@@ -542,16 +577,38 @@ it.for([
   },
 );
 
-it("recovers queued agents after both inspection slots expire without refusing an absent database", async () => {
+it("recovers queued configured and retired agents with preserved main stores without refusing an absent database", async () => {
   testState.agentsConfig = {
     ownership: "explicit",
-    entries: { a: {}, b: {}, main: {}, absent: {} },
+    entries: { main: {}, absent: {} },
   };
   testState.agentConfig = { systemAgent: { agentId: "main" } };
   const env = { ...process.env };
   const cfg = loadGatewayTestConfig();
   const agentIds = ["a", "b", "main"];
   const paths = agentIds.map((agentId) => openOpenClawAgentDatabase({ agentId, env }).path);
+  const preservedMainPath = openOpenClawAgentDatabase({
+    agentId: "main",
+    env,
+    path: path.join(resolveStateDir(env), "preserved-main.sqlite"),
+  }).path;
+  const preservedStores = [
+    { agentId: "a", path: paths[0]! },
+    { agentId: "b", path: paths[1]! },
+    { agentId: "main", path: preservedMainPath },
+  ];
+  for (const store of preservedStores) {
+    await upsertSessionEntryCore(
+      {
+        agentId: store.agentId,
+        env,
+        storePath: store.path,
+        sessionKey: `agent:${store.agentId}:retained`,
+      },
+      { sessionId: "retained", updatedAt: 1, label: "preserved history" },
+    );
+  }
+  paths.push(preservedMainPath);
   await closeOpenClawAgentDatabasesAsync();
   closeOpenClawAgentDatabasesForTest();
   await closeStateDatabaseForTest();
@@ -564,6 +621,7 @@ it("recovers queued agents after both inspection slots expire without refusing a
       database.close();
     }
   }
+  const preservedBytes = preservedStores.map((store) => fs.readFileSync(store.path));
   const pause = pauseIntegrityInspections({
     root: resolveStateDir(env),
     paths,
@@ -598,20 +656,41 @@ it("recovers queued agents after both inspection slots expire without refusing a
         code: "agent-database-inspection-pending",
       });
     }
+    expect(readAgentDatabaseAdmissionRefusal("main", { env })?.paths).toEqual(
+      expect.arrayContaining([paths[2], preservedMainPath]),
+    );
+    for (const store of preservedStores) {
+      expect(() => openOpenClawAgentDatabase({ ...store, env })).toThrow(
+        AgentDatabaseAdmissionError,
+      );
+    }
     expect(readAgentDatabaseAdmissionRefusal("absent", { env })).toBeUndefined();
     const absentOptions = { agentId: "absent", env };
     expect(fs.existsSync(resolveOpenClawAgentSqlitePath(absentOptions))).toBe(false);
     expect(openOpenClawAgentDatabase(absentOptions).agentId).toBe("absent");
     fs.writeFileSync(pause.releasePaths[1]!, "resume b");
     await vi.waitFor(
-      () => {
+      async () => {
         expect(fs.existsSync(pause.enteredPaths[2]!)).toBe(true);
-        for (const agentId of ["b", "main"]) {
-          expect(readAgentDatabaseAdmissionRefusal(agentId, { env })).toBeUndefined();
-        }
+        expect(fs.existsSync(pause.enteredPaths[3]!)).toBe(true);
+        expect({
+          refusals: ["b", "main"].map((agentId) =>
+            readAgentDatabaseAdmissionRefusal(agentId, { env }),
+          ),
+          readiness: (await fetch(`http://127.0.0.1:${started.port}/readyz`)).status,
+        }).toEqual({ refusals: [undefined, undefined], readiness: 200 });
       },
       { timeout: 10000 },
     );
+    const mainInput = listConfiguredOwnerInputs(getRuntimeConfig(), undefined, true).find(
+      (entry) => entry.agentId === "main",
+    );
+    expect(mainInput && getPreparedModelRuntimeSnapshot(mainInput)).toBeDefined();
+    const authStores = getActiveSecretsRuntimeSnapshot()?.authStores;
+    expect(authStores?.some((entry) => entry.databasePath === paths[2])).toBe(true);
+    for (const store of preservedStores) {
+      expect(authStores?.some((entry) => entry.databasePath === store.path)).toBe(false);
+    }
     expect(readAgentDatabaseAdmissionRefusal("a", { env })).toMatchObject({
       code: "agent-database-inspection-pending",
     });
@@ -621,6 +700,19 @@ it("recovers queued agents after both inspection slots expire without refusing a
       () => expect(readAgentDatabaseAdmissionRefusal("a", { env })).toBeUndefined(),
       { timeout: 10000 },
     );
+    for (const [index, store] of preservedStores.entries()) {
+      expect(
+        withOpenClawAgentDatabaseReadOnly(
+          (database) => readSessionEntryRow(database, `agent:${store.agentId}:retained`)?.entry,
+          { ...store, env },
+        ),
+      ).toMatchObject({
+        found: true,
+        value: { sessionId: "retained", label: "preserved history" },
+      });
+      expect(fs.readFileSync(store.path)).toEqual(preservedBytes[index]);
+    }
+    expect((await fetch(`http://127.0.0.1:${started.port}/readyz`)).status).toBe(200);
   } finally {
     fs.writeFileSync(pause.releasePath, "resume");
     await server?.close();

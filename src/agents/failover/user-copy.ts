@@ -94,7 +94,7 @@ function extractProviderRateLimitMessage(raw: string): string | undefined {
   ) {
     return undefined;
   }
-  return `⚠️ ${trimmed}`;
+  return `⚠️ ${trimmed.replace(/^(?:⚠️\s*)+/u, "")}`;
 }
 
 /** Render rate-limit versus overload copy from the canonical classified reason. */

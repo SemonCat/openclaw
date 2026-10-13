@@ -1,8 +1,22 @@
+import type { AssistantMessage } from "@openclaw/llm-core";
 import {
+  appendAssistantMessageDiagnostic,
   readProviderRefusalReview,
   type ProviderRefusalReview,
 } from "@openclaw/llm-core/diagnostics";
 import { isRecord } from "@openclaw/normalization-core/record-coerce";
+
+/** Compatible endpoints retain their provider identity for terminal refusal handling. */
+export function recordOpenAICyberPolicyRefusal(output: AssistantMessage): void {
+  if (output.stopReason !== "error" || output.errorCode !== "cyber_policy") {
+    return;
+  }
+  appendAssistantMessageDiagnostic(output, {
+    type: "provider_refusal",
+    timestamp: Date.now(),
+    details: { provider: output.provider, category: "cyber" },
+  });
+}
 
 /** Responses uses snake_case; the ChatGPT app-server error envelope uses camelCase. */
 export function readOpenAIMisalignmentReview(
