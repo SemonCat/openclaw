@@ -404,7 +404,12 @@ describe("embedded retry transcript ownership", () => {
           secondAttempt.resolve();
           expect(attempt).toMatchObject({ provider: model.provider, modelId: model.id });
           expect(attempt.prompt).toContain(
-            "Continue the current task from the existing transcript",
+            "Continue from the current transcript after the latest tool result.",
+          );
+          expect(attempt.prompt).toContain("do not rerun completed tools");
+          expect(attempt.prompt).toContain("inspect its state before deciding whether to retry it");
+          expect(attempt.prompt).toMatch(
+            /reference only, not a new request\):\n\nCheck the results\.$/,
           );
           expect(attempt.suppressNextUserMessagePersistence).toBe(true);
           expect(attempt.skipPreparedUserTurnMessage).toBe(true);

@@ -13,7 +13,9 @@ import { resolveOperatorModelDefault } from "../../agents/operator-model-policy.
 import { resolveProviderIdForAuth } from "../../agents/provider-auth-aliases.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { formatErrorMessage } from "../../infra/errors.js";
+import { readSessionInputProfileId } from "../../sessions/session-participant-input.js";
 import { resolveProfileOverride } from "./directive-handling.auth-profile.js";
+import type { HandleDirectiveOnlyParams } from "./directive-handling.params.js";
 import type { InlineDirectives } from "./directive-handling.parse.js";
 import { type ModelDirectiveSelection, resolveModelDirectiveSelection } from "./model-selection.js";
 
@@ -62,6 +64,30 @@ function resolveStoredNumericProfileModelDirective(params: { raw: string; agentD
   return { modelRaw, profileId, profileProvider: profile.provider };
 }
 
+/** Adapts directive transaction context to the model-selection owner. */
+export function resolveModelSelectionForDirectiveOnly(input: {
+  params: HandleDirectiveOnlyParams;
+  agentDir: string;
+  agentId: string;
+}) {
+  const { params } = input;
+  return resolveModelSelectionFromDirective({
+    directives: params.directives,
+    cfg: params.cfg,
+    agentDir: input.agentDir,
+    defaultProvider: params.defaultProvider,
+    defaultModel: params.defaultModel,
+    sessionDefaultProvider: params.sessionDefaultProvider,
+    sessionDefaultModel: params.sessionDefaultModel,
+    aliasIndex: params.aliasIndex,
+    allowedModelKeys: params.allowedModelKeys,
+    agentId: input.agentId,
+    modelPolicy: params.modelPolicy,
+    operatorAuthority: params.operatorAuthority,
+    requesterProfileId: params.ctx ? readSessionInputProfileId(params.ctx) : undefined,
+  });
+}
+
 /** Resolves the requested model/profile override from parsed inline directives. */
 export function resolveModelSelectionFromDirective(params: {
   directives: InlineDirectives;
@@ -69,6 +95,8 @@ export function resolveModelSelectionFromDirective(params: {
   agentDir: string;
   defaultProvider: string;
   defaultModel: string;
+  sessionDefaultProvider?: string;
+  sessionDefaultModel?: string;
   aliasIndex: ModelAliasIndex;
   allowedModelKeys: Set<string>;
   modelPolicy?: ModelVisibilityPolicy;
@@ -90,6 +118,8 @@ export function resolveModelSelectionFromDirective(params: {
   }
 
   const raw = params.directives.rawModelDirective.trim();
+  const sessionDefaultProvider = params.sessionDefaultProvider ?? params.defaultProvider;
+  const sessionDefaultModel = params.sessionDefaultModel ?? params.defaultModel;
   if (/^default$/i.test(raw)) {
     const policy =
       params.modelPolicy ??
@@ -104,7 +134,7 @@ export function resolveModelSelectionFromDirective(params: {
       cfg: params.cfg,
       agentId: params.agentId,
       policy: params.operatorAuthority?.modelPolicy,
-      model: { provider: params.defaultProvider, model: params.defaultModel },
+      model: { provider: sessionDefaultProvider, model: sessionDefaultModel },
       allows: policy.allows,
     });
     const errorText = validateOperatorSelection(params.operatorAuthority, selection);
@@ -173,7 +203,14 @@ export function resolveModelSelectionFromDirective(params: {
   if (resolved.error) {
     return { errorText: resolved.error };
   }
-  const modelSelection = resolved.selection;
+  const modelSelection = resolved.selection
+    ? {
+        ...resolved.selection,
+        isDefault:
+          resolved.selection.provider === sessionDefaultProvider &&
+          resolved.selection.model === sessionDefaultModel,
+      }
+    : undefined;
   if (modelSelection) {
     const errorText = validateOperatorSelection(params.operatorAuthority, modelSelection);
     if (errorText) {

@@ -11,6 +11,7 @@ import { resolveCacheRetention } from "../providers/cache-retention.js";
 import { buildCopilotDynamicHeaders } from "../providers/github-copilot-headers.js";
 import { finalizeOpenAICompletionsToolCalls } from "../providers/openai-completions-tool-calls.js";
 import { createOpenAIProviderClient } from "../providers/openai-provider-client.js";
+import { recordOpenAICyberPolicyRefusal } from "../providers/openai-provider-refusal.js";
 import {
   clearPendingCommentaryText,
   tagUnresolvedTextAsCommentary,
@@ -401,6 +402,7 @@ export function streamOpenAICompletionsRequest(
           if (mode === "managed") {
             output.stopReason = options?.signal?.aborted ? "aborted" : "error";
           }
+          recordOpenAICyberPolicyRefusal(output);
           finalizeOpenAICompletionsToolCalls(output, { allowSilentToolCallPromotion: false });
           clearPendingCommentaryText(provisionalCommentaryTags);
           tagUnresolvedTextAsCommentary(output);

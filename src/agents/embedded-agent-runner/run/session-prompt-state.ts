@@ -10,6 +10,7 @@ import type { AgentRunSessionTarget } from "../../run-session-target.types.js";
 import type { CustomMessage } from "../../sessions/messages.js";
 import { appendSessionTranscriptNote } from "../../sessions/session-manager-write-admission.js";
 import { TOOL_FAILURE_INSTRUCTION } from "../../tool-outcome-instructions.js";
+import { buildTranscriptContinuationPrompt } from "../../transcript-continuation-prompt.js";
 import type { AcceptedCompactionSuccessor } from "../compaction-successor.js";
 import { log } from "../logger.js";
 import type { RunEmbeddedAgentParamsWithSessionFile } from "./internal-params.js";
@@ -17,9 +18,6 @@ import {
   buildContextEngineCompactionSessionTarget,
   prepareInitialSessionWriter,
 } from "./session-bootstrap.js";
-
-const CONTINUATION_PROMPT =
-  "Continue the current task from the existing transcript, preserving completed work. If an action was interrupted, inspect its state before deciding whether to retry it. Do not restart the task or repeat completed actions.";
 
 type ActivePrompt = {
   override?: string;
@@ -35,6 +33,7 @@ export async function createEmbeddedRunSessionPromptState(input: {
   onInterrupt: (reason: Error) => void;
 }) {
   const { runParams: params, sessionAgentId, resolvedSessionKey, lifecycleGeneration } = input;
+  const compactedTranscriptContinuationPrompt = buildTranscriptContinuationPrompt(undefined);
   let activeSessionId = params.sessionId;
   let activeSessionFile = params.sessionFile;
   let activeSessionTarget: ContextEngineSessionTarget | undefined =
@@ -111,18 +110,23 @@ export async function createEmbeddedRunSessionPromptState(input: {
       notifySessionIdChanged();
     }
   };
-  // Internal control prompts are model-only context, never operator-authored transcript turns.
-  const activateInternalPrompt = (prompt: string) => {
+  // Set only while the base override is a transcript continuation that embeds
+  // the original request; any other internal prompt clears it.
+  let requestContinuation: { instructions?: string } | undefined;
+  const setInternalPrompt = (prompt: string, continuation?: { instructions?: string }) => {
     basePromptOverride = prompt;
+    requestContinuation = continuation;
     Object.assign(activePrompt, { persisted: true, internal: true });
     suppressNextUserMessagePersistence = true;
   };
+  // Internal control prompts are model-only context, never operator-authored transcript turns.
+  const activateInternalPrompt = (prompt: string) => setInternalPrompt(prompt);
   if (params.pluginRuntimeRefreshContinuation) {
     activateInternalPrompt(params.prompt);
   }
   const activateCompactionContinuation = (instruction: string) => {
     compactionContinuationInstruction = instruction;
-    activateInternalPrompt(basePromptOverride ?? "");
+    setInternalPrompt(basePromptOverride ?? "", requestContinuation);
   };
   const clearCompactionContinuation = () => (compactionContinuationInstruction = undefined);
   const onUserMessagePersisted: NonNullable<
@@ -273,15 +277,26 @@ export async function createEmbeddedRunSessionPromptState(input: {
         await waitForSessionTranscriptProjection({ ...target, sessionId }, abortSignal);
       }
     },
-    continueFromCurrentTranscript: (options?: { includeToolFailureInstruction?: boolean }) => {
+    continueFromCurrentTranscript: (options?: {
+      includeToolFailureInstruction?: boolean;
+      /** Compaction or truncation reduced context; the transcript owns the request. */
+      afterContextReduction?: boolean;
+    }) => {
       // Raw model runs load no transcript history; the original prompt is their only task context.
       if (params.modelRun === true || params.promptMode === "none") {
         return;
       }
-      const prompt = options?.includeToolFailureInstruction
-        ? `${CONTINUATION_PROMPT} ${TOOL_FAILURE_INSTRUCTION}`
-        : CONTINUATION_PROMPT;
-      activateInternalPrompt(prompt);
+      const continuation = options?.includeToolFailureInstruction
+        ? { instructions: TOOL_FAILURE_INSTRUCTION }
+        : {};
+      if (options?.afterContextReduction) {
+        setInternalPrompt(buildTranscriptContinuationPrompt(undefined, continuation));
+        return;
+      }
+      setInternalPrompt(
+        buildTranscriptContinuationPrompt(params.prompt, continuation),
+        continuation,
+      );
     },
     onUserMessagePersisted,
     waitForCurrentUserMessagePersistence,
@@ -289,10 +304,13 @@ export async function createEmbeddedRunSessionPromptState(input: {
       await waitForCurrentUserMessagePersistence();
       assertActive();
       settleOwnedTranscriptProjection = true;
-      if (activePrompt.internal) {
+      if (requestContinuation) {
+        // Compaction now owns the request; keep only the continuation's directives.
+        setInternalPrompt(buildTranscriptContinuationPrompt(undefined, requestContinuation));
+      } else if (activePrompt.internal) {
         suppressNextUserMessagePersistence = activePrompt.persisted;
       } else if (activePrompt.persisted) {
-        activateInternalPrompt(CONTINUATION_PROMPT);
+        activateInternalPrompt(compactedTranscriptContinuationPrompt);
       }
     },
   };

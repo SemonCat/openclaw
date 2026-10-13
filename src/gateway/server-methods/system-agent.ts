@@ -10,6 +10,7 @@ import {
   validateSystemAgentSetupAuthStartParams,
   validateSystemAgentSetupDetectParams,
   validateSystemAgentSetupVerifyParams,
+  type SystemAgentChatParams,
   type SystemAgentChatQuestion,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
@@ -308,16 +309,51 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
     },
   ),
   "openclaw.chat": async ({ params: rawParams, respond, client, context }) => {
-    const params = sanitizeSystemAgentChatParams(rawParams);
-    if (!assertValidParams(params, validateSystemAgentChatParams, "openclaw.chat", respond)) {
+    const sanitizedParams = sanitizeSystemAgentChatParams(rawParams);
+    if (
+      !assertValidParams(sanitizedParams, validateSystemAgentChatParams, "openclaw.chat", respond)
+    ) {
       return;
     }
+    const trustedAgentRuntime = client?.internal?.agentRuntimeIdentity;
+    // A verified agent caller is always delegated, even if RPC arguments omit that fact.
+    const params: SystemAgentChatParams = trustedAgentRuntime
+      ? {
+          ...sanitizedParams,
+          delegation: {
+            agentId: trustedAgentRuntime.agentId,
+            sessionKey: trustedAgentRuntime.sessionKey,
+            ...(trustedAgentRuntime.turnSourceChannel
+              ? { turnSourceChannel: trustedAgentRuntime.turnSourceChannel }
+              : {}),
+            ...(trustedAgentRuntime.turnSourceTo
+              ? { turnSourceTo: trustedAgentRuntime.turnSourceTo }
+              : {}),
+            ...(trustedAgentRuntime.turnSourceAccountId
+              ? { turnSourceAccountId: trustedAgentRuntime.turnSourceAccountId }
+              : {}),
+            ...(trustedAgentRuntime.turnSourceThreadId !== undefined
+              ? { turnSourceThreadId: trustedAgentRuntime.turnSourceThreadId }
+              : {}),
+          },
+        }
+      : sanitizedParams;
     const inputError = getSystemAgentChatInputError(params);
     if (inputError) {
       respond(false, undefined, errorShape(ErrorCodes.INVALID_REQUEST, inputError));
       return;
     }
+    const assertLiveWireRuntimeAuthority = () => {
+      if (
+        trustedAgentRuntime &&
+        context.validateAgentRuntimeApprovalAuthority?.(trustedAgentRuntime) !== true
+      ) {
+        throw new Error("agent runtime authority is no longer active");
+      }
+    };
     const pending = await runSystemAgentGatewayTask(async () => {
+      // Admission may precede a wait for the serialized system-agent task owner.
+      assertLiveWireRuntimeAuthority();
       const sessions = context.systemAgentSessions;
       const sessionId = params.sessionId;
       // Initialization, resets, turns, and approval application share this task owner.
@@ -404,6 +440,7 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           );
           return undefined;
         }
+        assertLiveWireRuntimeAuthority();
         const engine = new SystemAgentChatEngine({
           surface: "gateway",
           deps: {
@@ -453,6 +490,27 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
             welcomeQuestion = buildSystemAgentGreetingQuestion(overview, facts);
             engine.noteAssistantMessage(welcome);
           }
+          assertLiveWireRuntimeAuthority();
+          // Passive welcomes are ephemeral; an external-edit alert must survive
+          // before delivery acknowledges the audit cursor that would hide it.
+          if (persistWelcome) {
+            persistSystemAgentEngineHistory(engine, welcomeHistoryStart);
+          }
+          await evictOldestSession(sessions, context);
+          assertLiveWireRuntimeAuthority();
+          session = {
+            engine,
+            welcome,
+            optionalWelcome: params.welcomeVariant === undefined && !persistWelcome,
+            ...(params.welcomeVariant === "new-agent" ? { newAgentWelcome: welcome } : {}),
+            ...(welcomeQuestion ? { welcomeQuestion } : {}),
+            ...(greetingAuditSequence !== undefined
+              ? { welcomeAuditSequence: greetingAuditSequence }
+              : {}),
+            lastUsedAt: Date.now(),
+            ownerKey,
+          };
+          sessions.set(sessionId, session);
         } catch (error) {
           await engine.dispose().catch(() => undefined);
           if (!isSystemAgentInferenceUnavailableError(error)) {
@@ -461,25 +519,6 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           respond(false, undefined, errorShape(ErrorCodes.UNAVAILABLE, error.message));
           return undefined;
         }
-        // Passive welcomes are ephemeral; an external-edit alert must survive
-        // before delivery acknowledges the audit cursor that would hide it.
-        if (persistWelcome) {
-          persistSystemAgentEngineHistory(engine, welcomeHistoryStart);
-        }
-        await evictOldestSession(sessions, context);
-        session = {
-          engine,
-          welcome,
-          optionalWelcome: params.welcomeVariant === undefined && !persistWelcome,
-          ...(params.welcomeVariant === "new-agent" ? { newAgentWelcome: welcome } : {}),
-          ...(welcomeQuestion ? { welcomeQuestion } : {}),
-          ...(greetingAuditSequence !== undefined
-            ? { welcomeAuditSequence: greetingAuditSequence }
-            : {}),
-          lastUsedAt: Date.now(),
-          ownerKey,
-        };
-        sessions.set(sessionId, session);
         if (welcomeOnly) {
           respond(
             true,
@@ -508,7 +547,10 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
             !session.pendingApproval &&
             !session.engine.getPendingOperatorProposal()
           ) {
-            session.newAgentWelcome ??= await buildNewAgentWelcome({ engine: session.engine });
+            const newAgentWelcome =
+              session.newAgentWelcome ?? (await buildNewAgentWelcome({ engine: session.engine }));
+            assertLiveWireRuntimeAuthority();
+            session.newAgentWelcome = newAgentWelcome;
             respond(
               true,
               { sessionId, reply: session.newAgentWelcome, optionalWelcome: false, action: "none" },
@@ -545,6 +587,7 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
             session,
             sessionId,
             delegation: params.delegation,
+            ...(trustedAgentRuntime ? { trustedAgentRuntime } : {}),
           });
         }
         const turnReply = await runSystemAgentChatInput({
