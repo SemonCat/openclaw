@@ -43,13 +43,7 @@ function requireAttemptCall(index: number): {
 
 function expectRetryContinuesFromTranscript(): void {
   const retry = requireAttemptCall(1);
-  expect(retry.prompt).toContain(
-    "Continue from the current transcript after the latest tool result.",
-  );
-  expect(retry.prompt).toContain("do not rerun completed tools");
-  expect(retry.prompt).toContain("inspect its state before deciding whether to retry it");
-  // Context reduction leaves the request in the transcript; re-embedding it would regrow context.
-  expect(retry.prompt).not.toContain("Original user request");
+  expect(retry.prompt).toContain("Continue the current task from the existing transcript");
   expect(retry.suppressNextUserMessagePersistence).toBe(true);
   expect(retry.prompt).not.toBe(session.runParams.prompt);
 }

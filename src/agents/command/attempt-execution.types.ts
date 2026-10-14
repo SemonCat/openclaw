@@ -13,7 +13,6 @@ import type { DeferredEmbeddedRunLifecycleManager } from "../embedded-agent-runn
 import type { RunEmbeddedAgentInternalParams } from "../embedded-agent-runner/run/internal-params.js";
 import type { PreparedModelRuntimePluginGeneration } from "../prepared-model-runtime.types.js";
 import type { AgentMessage } from "../runtime/index.js";
-import type { AgentFallbackRuntimeState } from "./attempt-execution.shared.js";
 import type { AgentCommandOpts, AgentRunContext } from "./types.js";
 
 export type RunAgentAttemptParams = Pick<
@@ -70,7 +69,7 @@ export type RunAgentAttemptParams = Pick<
     pluginGeneration: PreparedModelRuntimePluginGeneration | undefined;
     modelFallbacksOverride?: string[];
     sessionHasHistory?: boolean;
-    fallbackRuntimeState?: AgentFallbackRuntimeState;
+    fallbackRuntimeState?: { originRuntime?: "cli" | "embedded" };
     suppressPromptPersistenceOnRetry?: boolean;
     userTurnTranscriptRecorder?: UserTurnTranscriptRecorder;
     onUserMessagePersisted?: (message: Extract<AgentMessage, { role: "user" }>) => void;

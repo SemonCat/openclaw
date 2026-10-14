@@ -23,8 +23,6 @@ export type HandleDirectiveOnlyParams = {
   elevatedFailures?: Array<{ gate: string; key: string }>;
   defaultProvider: string;
   defaultModel: string;
-  sessionDefaultProvider?: string;
-  sessionDefaultModel?: string;
   aliasIndex: ModelAliasIndex;
   allowedModelKeys: Set<string>;
   modelPolicy?: ModelVisibilityPolicy;

@@ -294,16 +294,10 @@ describe("runEmbeddedAgent prompt timeout fallback handoff", () => {
       expect(continuation?.skipPreparedUserTurnMessage).toBe(true);
       if (harness === "openclaw") {
         expect(continuation?.prompt).toContain(
-          "Continue from the current transcript after the latest tool result.",
+          "Continue the current task from the existing transcript",
         );
         expect(continuation?.prompt).toContain(
-          "do not rerun completed tools or repeat completed side effects.",
-        );
-        expect(continuation?.prompt).toContain(
-          "inspect its state before deciding whether to retry it",
-        );
-        expect(continuation?.prompt).toMatch(
-          /reference only, not a new request\):\n\nWrite note\.txt, then read it to verify its contents\.$/,
+          "Do not restart the task or repeat completed actions.",
         );
         expect(continuation?.disableTools).not.toBe(true);
         expect(continuation?.operation).not.toBe("settled-tool-finalization");

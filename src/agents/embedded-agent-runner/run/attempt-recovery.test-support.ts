@@ -35,20 +35,11 @@ export type TransportDropScenario = {
   noTools?: boolean;
   lastToolError?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["lastToolError"];
   pluginHarnessOwnsTransport?: boolean;
-  promptError?: Error;
-  rateLimitRotationResult?: boolean;
   retryAvailable?: boolean;
   retryConnectionErrors?: boolean;
   replaySafe?: boolean;
   fallbackConfigured?: boolean;
   providerRetryMaxDelayMs?: number;
-  onSettledTranscriptModelFallback?: () => void;
-  lateSyntheticPriorFailures?: boolean;
-  latestToolResult?: "success" | "missing" | "absent";
-  terminalizedLatestMissingResult?: boolean;
-  terminalizedResultReason?: string;
-  terminalizedToolCalls?: ReadonlyArray<{ toolCallId: string; toolName: string }>;
-  startedCount?: number;
   terminal?: Parameters<typeof makeEmbeddedRunnerAttempt>[0]["terminal"];
   usage?: AssistantMessage["usage"];
   terminate?: boolean;
@@ -64,35 +55,10 @@ export const disabledCompactionRuntime = {
 // Live shape: a code-mode exec batch settled, then the ChatGPT Responses stream
 // died while the model was still reasoning, so the errored turn is thinking-only.
 export async function recoverAfterTransportDrop(scenario: TransportDropScenario = {}) {
-  const terminalizedLatestMissingResult = scenario.terminalizedLatestMissingResult === true;
-  const priorToolCalls = scenario.lateSyntheticPriorFailures
-    ? ["bash-prior-1", "bash-prior-2"]
-    : terminalizedLatestMissingResult
-      ? ["bash-earlier"]
-      : [];
-  const toolCalls = scenario.noTools
-    ? []
-    : scenario.lateSyntheticPriorFailures
-      ? ["exec-3ce0"]
-      : terminalizedLatestMissingResult
-        ? ["exec-a731"]
-        : ["call_1", "call_2"];
-  const allToolCalls = [...priorToolCalls, ...toolCalls];
-  const priorToolAssistants = priorToolCalls.map((id) =>
-    buildEmbeddedRunnerAssistant({
-      stopReason: "toolUse",
-      content: [{ type: "toolCall", id, name: "bash", arguments: {} }],
-    }),
-  );
-  const latestToolName = terminalizedLatestMissingResult ? "bash" : "exec";
+  const toolCalls = scenario.noTools ? [] : ["call_1", "call_2"];
   const toolAssistant = buildEmbeddedRunnerAssistant({
     stopReason: "toolUse",
-    content: toolCalls.map((id) => ({
-      type: "toolCall",
-      id,
-      name: latestToolName,
-      arguments: {},
-    })),
+    content: toolCalls.map((id) => ({ type: "toolCall", id, name: "exec", arguments: {} })),
   });
   const erroredAssistant =
     scenario.assistant ??
@@ -118,65 +84,25 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     });
   const provider = erroredAssistant.provider;
   const modelId = erroredAssistant.model;
-  const messagesSnapshot = terminalizedLatestMissingResult
-    ? ([
-        { role: "user", content: "wait for the Herdr agent" },
-        priorToolAssistants[0],
-        {
-          role: "toolResult",
-          toolCallId: "bash-earlier",
-          toolName: "bash",
-          isError: false,
-        },
-        toolAssistant,
-        {
-          role: "toolResult",
-          toolCallId: "exec-a731",
-          toolName: "bash",
-          isError: true,
-          details: { reason: scenario.terminalizedResultReason ?? "missing_tool_result" },
-        },
-        erroredAssistant,
-      ] as never)
-    : ([
-        { role: "user", content: "why is it unauthorized?" },
-        ...priorToolAssistants,
-        ...(toolCalls.length > 0 ? [toolAssistant] : []),
-        ...(scenario.latestToolResult === "absent"
-          ? []
-          : toolCalls
-              .filter((id) => !scenario.missingToolResult || id !== "call_2")
-              .map((id) =>
-                scenario.latestToolResult === "missing"
-                  ? {
-                      role: "toolResult",
-                      toolCallId: id,
-                      toolName: "exec",
-                      isError: true,
-                      details: { reason: "missing_tool_result" },
-                    }
-                  : {
-                      role: "toolResult",
-                      toolCallId: id,
-                      toolName: "exec",
-                      isError: id === scenario.failedToolCallId,
-                    },
-              )),
-        ...priorToolCalls.map((id) => ({
-          role: "toolResult",
-          toolCallId: id,
-          toolName: "bash",
-          isError: true,
-          details: { reason: "missing_tool_result" },
-        })),
-        erroredAssistant,
-      ] as never);
+  const messagesSnapshot = [
+    { role: "user", content: "why is it unauthorized?" },
+    ...(toolCalls.length > 0 ? [toolAssistant] : []),
+    ...toolCalls
+      .filter((id) => !scenario.missingToolResult || id !== "call_2")
+      .map((id) => ({
+        role: "toolResult",
+        toolCallId: id,
+        toolName: "exec",
+        isError: id === scenario.failedToolCallId,
+      })),
+    erroredAssistant,
+  ] as never;
   const attempt = makeEmbeddedRunnerAttempt({
     assistantTexts: scenario.assistantTexts ?? [],
     messagesSnapshot,
-    toolMetas: allToolCalls.map((toolCallId) => ({
+    toolMetas: toolCalls.map((toolCallId) => ({
       toolCallId,
-      toolName: toolCallId.startsWith("bash-") ? "bash" : latestToolName,
+      toolName: "exec",
       replaySafe: false,
       ...(scenario.asyncStarted ? { asyncStarted: true } : {}),
       ...(scenario.terminate ? { terminate: true } : {}),
@@ -187,34 +113,14 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     ...(scenario.completedAssistant
       ? { currentAttemptCompletedAssistant: scenario.completedAssistant }
       : {}),
-    lastToolError:
-      scenario.lastToolError ??
-      (terminalizedLatestMissingResult
-        ? { toolName: "bash", error: "missing tool result" }
-        : scenario.lateSyntheticPriorFailures
-          ? { toolName: "bash", error: "missing tool result" }
-          : undefined),
+    lastToolError: scenario.lastToolError,
     didSendDeterministicApprovalPrompt: scenario.didSendDeterministicApprovalPrompt,
     itemLifecycle: {
-      startedCount: scenario.startedCount ?? allToolCalls.length,
-      completedCount: terminalizedLatestMissingResult
-        ? 1
-        : scenario.lateSyntheticPriorFailures
-          ? 1
-          : toolCalls.length,
-      activeCount:
-        scenario.activeCount ??
-        (terminalizedLatestMissingResult
-          ? 1
-          : scenario.lateSyntheticPriorFailures
-            ? priorToolCalls.length + (scenario.latestToolResult === "success" ? 0 : 1)
-            : 0),
+      startedCount: toolCalls.length,
+      completedCount: toolCalls.length,
+      activeCount: scenario.activeCount ?? 0,
     },
-    ...(scenario.promptError
-      ? { terminal: { kind: "failed", source: "prompt", error: scenario.promptError } }
-      : scenario.terminal
-        ? { terminal: scenario.terminal }
-        : {}),
+    ...(scenario.terminal ? { terminal: scenario.terminal } : {}),
     ...(scenario.yieldDetected ? { yieldDetected: true } : {}),
     ...(scenario.providerRetryMaxDelayMs !== undefined
       ? { providerRetryMaxDelayMs: scenario.providerRetryMaxDelayMs }
@@ -223,13 +129,6 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
       ? { currentAttemptReplayMetadata: { replaySafe: true, hadPotentialSideEffects: false } }
       : {}),
   });
-  if (terminalizedLatestMissingResult) {
-    Object.assign(attempt, {
-      terminalizedToolCalls: scenario.terminalizedToolCalls ?? [
-        { toolCallId: "exec-a731", toolName: "bash" },
-      ],
-    });
-  }
   const terminalState = resolveEmbeddedRunAttemptTerminalState({
     attempt,
     assistant: erroredAssistant,
@@ -245,30 +144,20 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
     } as Parameters<typeof createEmbeddedRunFailoverRetryController>[0]["runParams"],
     provider,
     modelId,
+    globalLane: "test",
     agentDir: "/tmp/provider-recovery-test",
     fallbackConfigured: scenario.fallbackConfigured ?? false,
-    profileFailureStore: {
-      version: 1,
-      profiles: {
-        "openai:test-profile": {
-          type: "oauth",
-          provider: "openai",
-          access: "test-access",
-          refresh: "test-refresh",
-          expires: 4_000_000_000_000,
-        },
-      },
-    },
-    getLastProfileId: () => "openai:test-profile",
+    profileFailureStore: { version: 1, profiles: {} },
+    getLastProfileId: () => undefined,
+    getSessionId: () => "session:transport-drop",
     harnessOwnsTransport: () => scenario.pluginHarnessOwnsTransport ?? false,
     getRuntimeAuthOwnerId: () => "embedded",
     getApiKeyInfo: () => null,
-    advanceAuthProfile: vi.fn(async () => scenario.rateLimitRotationResult ?? false),
+    advanceAuthProfile: vi.fn(async () => false),
   });
   if (scenario.retryAvailable === false) {
     failoverRetryController.observeAttempt({ providerRetryMaxRetries: 0 });
   }
-  vi.spyOn(failoverRetryController, "advanceRateLimitAuthProfile");
   vi.spyOn(failoverRetryController, "maybeMarkAuthProfileFailure");
   const onAgentEvent = vi.fn();
   const recover = () =>
@@ -280,14 +169,12 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
           sessionId: "session:transport-drop",
           runId: "run:transport-drop",
           onAgentEvent,
-          onSettledTranscriptModelFallback: scenario.onSettledTranscriptModelFallback,
         },
         resolvedSessionKey: "agent:main:transport-drop",
-        agentDir: "/tmp/provider-recovery-test",
         fallbackConfigured: scenario.fallbackConfigured ?? false,
+        suspendForFailure: vi.fn(),
         startedAtMs: Date.now(),
         laneController: { throwIfAborted: vi.fn() },
-        suspendForFailure: vi.fn(),
       },
       preparedRuntime: {
         provider,
@@ -295,20 +182,7 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
         model: { id: modelId },
         genericCompactionRecoveryAllowed: scenario.compactionEnabled ?? false,
         attemptedThinking: new Set(["off"]),
-        attemptAuthProfileStore: {
-          version: 1,
-          profiles: {
-            "openai:test-profile": {
-              type: "oauth",
-              provider: "openai",
-              access: "test-access",
-              refresh: "test-refresh",
-              expires: 4_000_000_000_000,
-            },
-          },
-        },
         maybeRefreshRuntimeAuthForAuthError: vi.fn(async () => false),
-        setThinkLevel: vi.fn(),
         snapshot: () => ({
           thinkLevel: "off",
           agentHarness: { id: "openclaw" },
@@ -318,7 +192,6 @@ export async function recoverAfterTransportDrop(scenario: TransportDropScenario 
           providerRuntimeHandle: scenario.providerOwner
             ? { plugin: scenario.providerOwner }
             : undefined,
-          lastProfileId: "openai:test-profile",
         }),
       },
       normalizedAttempt: {

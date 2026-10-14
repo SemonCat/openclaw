@@ -71,10 +71,9 @@ import {
   isClaudeCliProvider,
   claudeCliSessionTranscriptHasContent,
   resolveCommandReplyExpectation,
-  rebaseExecApprovalContinuationPromptRange,
   resolveFallbackRetryPrompt,
+  rebaseExecApprovalContinuationPromptRange,
 } from "./attempt-execution.helpers.js";
-import { createSettledTranscriptFallbackCallback } from "./attempt-execution.shared.js";
 import type { RunAgentAttemptParams } from "./attempt-execution.types.js";
 
 const log = createSubsystemLogger("agents/agent-command");
@@ -180,7 +179,6 @@ export function runAgentAttempt(params: RunAgentAttemptParams) {
     isFallbackRetry: params.isFallbackRetry,
     sessionHasHistory: params.sessionHasHistory,
     priorContextPrelude: claudeCliFallbackPrelude,
-    continueFromSettledTranscript: params.fallbackRuntimeState?.continueFromSettledTranscript,
   });
   const effectivePrompt = isRawModelRun
     ? resolvedPrompt
@@ -464,8 +462,6 @@ export function runAgentAttempt(params: RunAgentAttemptParams) {
               isFallbackRetry: params.isFallbackRetry,
               sessionHasHistory: params.sessionHasHistory,
               priorContextPrelude: claudeCliFallbackPrelude,
-              continueFromSettledTranscript:
-                params.fallbackRuntimeState?.continueFromSettledTranscript,
             })
           : resolvedPrompt;
         const cliEffectivePrompt = params.opts.execApprovalContinuationPromptRange
@@ -753,9 +749,6 @@ export function runAgentAttempt(params: RunAgentAttemptParams) {
     requestedRouteResolution: "resolved",
     modelThinkingCapability: params.modelThinkingCapability,
     modelFallbacksOverride: params.modelFallbacksOverride,
-    onSettledTranscriptModelFallback: createSettledTranscriptFallbackCallback(
-      params.fallbackRuntimeState,
-    ),
     authProfileId,
     authProfileIdSource: authProfileId ? harnessAuthSelection.authProfileIdSource : undefined,
     isFinalFallbackAttempt: params.isFinalFallbackAttempt,
@@ -794,8 +787,6 @@ export function runAgentAttempt(params: RunAgentAttemptParams) {
     onDeferredLifecycleOwner: params.deferredLifecycle?.adopt,
     onDeferredLifecycleAbort: params.deferredLifecycle?.abort,
     onRetryWait: params.deferredLifecycle?.beginRetryWait,
-    skipPreparedUserTurnMessage:
-      params.isFallbackRetry && params.fallbackRuntimeState?.continueFromSettledTranscript === true,
     assistantErrorTranscript: params.assistantErrorTranscript,
     authProfileFailurePolicy: params.authProfileFailurePolicy,
     onUserMessagePersisted: params.onUserMessagePersisted,

@@ -10,6 +10,7 @@ import {
   markDiagnosticEmbeddedRunStarted,
   resolveRunStaleThresholdMs,
 } from "../../../logging/diagnostic-run-activity.js";
+import { FailoverError } from "../../failover-error.js";
 import { resolveRetryAfterMs } from "../../failover/retry-evidence.js";
 import {
   createDeferredEmbeddedRunLifecycleManager,
@@ -51,10 +52,12 @@ function createController(
     } as ControllerInput["runParams"],
     provider: "openai",
     modelId: "gpt-5.6-luna",
+    globalLane: "test",
     agentDir: "/tmp/openclaw-failover-retry-controller-test",
     fallbackConfigured,
     profileFailureStore: { version: 1, profiles: {} },
     getLastProfileId: () => "openai:p1",
+    getSessionId: () => "session:failover-retry-controller-test",
     harnessOwnsTransport: () => false,
     getRuntimeAuthOwnerId: () => "embedded",
     getApiKeyInfo: () => null,
@@ -62,10 +65,17 @@ function createController(
   });
 }
 
+const rateLimitContext = {
+  failoverProvider: "openai",
+  failoverModel: "gpt-5.6-luna",
+  logFallbackDecision: vi.fn(),
+};
+
 describe("createEmbeddedRunFailoverRetryController", () => {
   beforeEach(() => {
     mocks.sleepWithAbort.mockReset().mockResolvedValue(undefined);
     mocks.warn.mockClear();
+    rateLimitContext.logFallbackDecision.mockClear();
   });
 
   it("reports bounded retry-owner reasons without provider or credential metadata", async () => {
@@ -433,7 +443,7 @@ describe("createEmbeddedRunFailoverRetryController", () => {
     const advanceAuthProfile = vi.fn(async () => true);
     const controller = createController(advanceAuthProfile);
 
-    await expect(controller.advanceRateLimitAuthProfile()).resolves.toBe(true);
+    await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).resolves.toBe(true);
     await expect(controller.maybeRetryTransient({ reason: "rate_limit" })).resolves.toBe(true);
 
     expect(advanceAuthProfile).toHaveBeenCalledTimes(1);
@@ -501,27 +511,24 @@ describe("createEmbeddedRunFailoverRetryController", () => {
     }
   });
 
-  it.each(["auth", "billing", "format", "context_overflow"] as const)(
-    "does not retry %s failures despite provider pacing",
-    async (reason) => {
-      const controller = createController(vi.fn(async () => false));
-      await expect(controller.maybeRetryTransient({ reason, retryAfterMs: 1000 })).resolves.toBe(
-        false,
-      );
-      expect(mocks.sleepWithAbort).not.toHaveBeenCalled();
-    },
-  );
+  it("escalates after one successful rate-limit rotation without advancing again", async () => {
+    const advanceAuthProfile = vi.fn(async () => true);
+    const controller = createController(advanceAuthProfile, true);
 
-  it("keeps rotating until every configured profile is exhausted", async () => {
-    const remainingProfiles = [true, true, true, true, false];
-    const advanceAuthProfile = vi.fn(async () => remainingProfiles.shift() ?? false);
-    const controller = createController(advanceAuthProfile);
+    await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).resolves.toBe(true);
+    await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).rejects.toMatchObject({
+      name: "FailoverError",
+      reason: "rate_limit",
+      status: 429,
+    } satisfies Partial<FailoverError>);
+    await expect(controller.advanceRateLimitAuthProfile(rateLimitContext)).rejects.toBeInstanceOf(
+      FailoverError,
+    );
 
-    for (let index = 0; index < 4; index += 1) {
-      await expect(controller.advanceRateLimitAuthProfile()).resolves.toBe(true);
-    }
-    await expect(controller.advanceRateLimitAuthProfile()).resolves.toBe(false);
-
-    expect(advanceAuthProfile).toHaveBeenCalledTimes(5);
+    expect(advanceAuthProfile).toHaveBeenCalledTimes(1);
+    expect(rateLimitContext.logFallbackDecision).toHaveBeenCalledTimes(2);
+    expect(rateLimitContext.logFallbackDecision).toHaveBeenNthCalledWith(1, "fallback_model", {
+      status: 429,
+    });
   });
 });

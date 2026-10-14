@@ -107,17 +107,7 @@ describe("runEmbeddedAgent timeout recovery composition", () => {
       sessionTarget: successor,
     });
     expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toContain(
-      "Continue from the current transcript after the latest tool result.",
-    );
-    expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toContain(
-      "do not rerun completed tools",
-    );
-    expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).toContain(
-      "inspect its state before deciding whether to retry it",
-    );
-    // The compacted transcript owns the request; the retry must not regrow it.
-    expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).not.toContain(
-      "Original user request",
+      "Continue the current task from the existing transcript",
     );
     expect(mockedRunEmbeddedAttempt.mock.calls[1]?.[0]?.prompt).not.toBe(session.runParams.prompt);
     const compactParams = mockedCompactDirect.mock.calls[0]?.[0] as CompactParams | undefined;

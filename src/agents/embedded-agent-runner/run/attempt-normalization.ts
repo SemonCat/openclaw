@@ -252,7 +252,7 @@ export async function normalizeEmbeddedRunAttempt(input: {
       if ((preflightRecovery.truncatedCount ?? 0) > 0) {
         sessionPromptState.markOwnedTranscriptRetry();
       }
-      sessionPromptState.continueFromCurrentTranscript({ afterContextReduction: true });
+      sessionPromptState.continueFromCurrentTranscript();
     }
     const retryKind = resolveRunRetryKind({
       preflightRecovery,

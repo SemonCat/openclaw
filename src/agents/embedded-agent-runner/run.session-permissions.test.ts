@@ -120,11 +120,7 @@ describe("embedded run session permissions", () => {
         expect(attempt.permissionMode).toBe(after ?? undefined);
         expect(attempt.execOverrides?.mode).toBe(execMode);
         expect(attempt.sessionId).toBe(pluginHarnessRunParams.sessionId);
-        expect(attempt.prompt).toContain(
-          "Continue from the current transcript after the latest tool result.",
-        );
-        expect(attempt.prompt).toContain("do not rerun completed tools");
-        expect(attempt.prompt).toContain("inspect its state before deciding whether to retry it");
+        expect(attempt.prompt).toContain("Continue the current task from the existing transcript");
         expect(attempt.prompt).not.toBe(pluginHarnessRunParams.prompt);
         expect(attempt.suppressNextUserMessagePersistence).toBe(true);
         expect(attempt.skipPreparedUserTurnMessage).toBe(true);

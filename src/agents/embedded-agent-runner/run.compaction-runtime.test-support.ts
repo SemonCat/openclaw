@@ -359,8 +359,7 @@ async function createRecoveryFixture(state: OpenClawTestState, options: FixtureO
         signalOwnedInterruption: false,
         promptError,
         attemptCompactionCount: 0,
-        prepareCurrentTranscriptRetry: () =>
-          sessionPromptState.continueFromCurrentTranscript({ afterContextReduction: true }),
+        prepareCurrentTranscriptRetry: sessionPromptState.continueFromCurrentTranscript,
         markOwnedTranscriptRetry: sessionPromptState.markOwnedTranscriptRetry,
       });
     };

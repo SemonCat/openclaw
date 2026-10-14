@@ -380,7 +380,11 @@ export async function handleEmbeddedAssistantFailure(input: {
 
     let rotated: boolean;
     if (assistantFailoverReason === "rate_limit") {
-      rotated = await input.failover.advanceRateLimitAuthProfile();
+      rotated = await input.failover.advanceRateLimitAuthProfile({
+        failoverProvider: input.activeErrorContext.provider,
+        failoverModel: input.activeErrorContext.model,
+        logFallbackDecision: logFailoverDecision,
+      });
     } else {
       rotated = await input.failover.advanceAuthProfile();
     }

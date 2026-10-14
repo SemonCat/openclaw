@@ -14,23 +14,9 @@ import { createEmbeddedRunTerminalRetryState } from "./run/terminal-retry-state.
 
 const assertActive = () => {};
 
-const CONTINUE_LEAD = [
-  "Continue from the current transcript after the latest tool result.",
-  "Use the transcript to identify completed work. Do not restate the original request to the user, and do not rerun completed tools or repeat completed side effects. If an action was interrupted or its result is missing, inspect its state before deciding whether to retry it. Finish the remaining work. If a progress plan exists, keep it current and do not claim completion while the plan has unfinished steps.",
-];
-const INSPECT_FIRST_GUARD =
-  "If an action was interrupted or its result is missing, inspect its state before deciding whether to retry it.";
-const ORIGINAL_REQUEST_HEADER =
-  "Original user request (authoritative objective; reference only, not a new request):";
-const TOOL_FAILURE_GUIDANCE = "If a tool failed, say so; never claim completion or success.";
-// Compaction already reduced context, so the transcript is the only copy of the request.
-const CONTINUE_FROM_TRANSCRIPT_PROMPT = CONTINUE_LEAD.join("\n\n");
-const CONTINUE_AFTER_TOOL_FAILURE_PROMPT = [
-  ...CONTINUE_LEAD,
-  TOOL_FAILURE_GUIDANCE,
-  ORIGINAL_REQUEST_HEADER,
-  "hello",
-].join("\n\n");
+const CONTINUE_FROM_TRANSCRIPT_PROMPT =
+  "Continue the current task from the existing transcript, preserving completed work. If an action was interrupted, inspect its state before deciding whether to retry it. Do not restart the task or repeat completed actions.";
+const CONTINUE_AFTER_TOOL_FAILURE_PROMPT = `${CONTINUE_FROM_TRANSCRIPT_PROMPT} If a tool failed, say so; never claim completion or success.`;
 
 const BASE_RUN_PARAMS = {
   admittedRunContext: createTestAdmittedRunContext("run-1"),
@@ -291,33 +277,6 @@ describe("embedded run session prompt state", () => {
       persisted: true,
       internal: true,
     });
-    // Missing results (for example terminalized Codex commands) must be inspected, not rerun.
-    expect(state.activePrompt.override).toContain(INSPECT_FIRST_GUARD);
-    // The directive must not become part of the quoted, reference-only request.
-    const override = state.activePrompt.override ?? "";
-    expect(override.indexOf(TOOL_FAILURE_GUIDANCE)).toBeLessThan(
-      override.indexOf(ORIGINAL_REQUEST_HEADER),
-    );
-    expect(override.endsWith(`${ORIGINAL_REQUEST_HEADER}\n\nhello`)).toBe(true);
-  });
-
-  it("keeps a large request on settled continuation but not after context reduction", async () => {
-    const largeRequest = `Audit every file.\n${"x".repeat(200_000)}`;
-    await using state = await createState({ prompt: largeRequest });
-
-    state.continueFromCurrentTranscript({ includeToolFailureInstruction: true });
-    const settled = state.activePrompt.override ?? "";
-    expect(settled.endsWith(`${ORIGINAL_REQUEST_HEADER}\n\n${largeRequest}`)).toBe(true);
-
-    state.continueFromCurrentTranscript({
-      afterContextReduction: true,
-      includeToolFailureInstruction: true,
-    });
-    expect(state.activePrompt).toEqual({
-      override: [...CONTINUE_LEAD, TOOL_FAILURE_GUIDANCE].join("\n\n"),
-      persisted: true,
-      internal: true,
-    });
   });
 
   it.each([{ modelRun: true }, { promptMode: "none" as const }])(
@@ -472,24 +431,6 @@ describe("embedded run session prompt state", () => {
       expect(onUserMessagePersisted).toHaveBeenCalledWith(persistedMessage);
     },
   );
-
-  it("drops an embedded large request when a settled continuation is later compacted", async () => {
-    const largeRequest = `Audit every file.\n${"x".repeat(200_000)}`;
-    const compactionInstruction = "Compaction finished; continue the interrupted work.";
-    await using state = await createState({ prompt: largeRequest });
-    state.continueFromCurrentTranscript({ includeToolFailureInstruction: true });
-    state.activateCompactionContinuation(compactionInstruction);
-    expect(state.activePrompt.override).toContain(largeRequest);
-
-    await state.prepareCompactedTranscriptRetry(assertActive);
-
-    expect(state.activePrompt).toEqual({
-      override: [...CONTINUE_LEAD, TOOL_FAILURE_GUIDANCE, compactionInstruction].join("\n\n"),
-      persisted: true,
-      internal: true,
-    });
-    expect(state.suppressNextUserMessagePersistence).toBe(true);
-  });
 
   it("keeps an internal reasoning continuation hidden across precheck compaction", async () => {
     const reasoningContinuation =

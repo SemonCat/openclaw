@@ -86,7 +86,6 @@ function toolApprovalReviewOutcome(state: ToolApprovalReviewState): ToolApproval
 export class CodexToolTranscriptProjection {
   private readonly messages: AgentMessage[] = [];
   private readonly resultIds = new Set<string>();
-  private readonly syntheticMissingResultIds = new Set<string>();
   private readonly namesById = new Map<string, string>();
   private readonly trajectoryResultIds = new Set<string>();
   private readonly trajectoryNamesById = new Map<string, string>();
@@ -557,9 +556,6 @@ export class CodexToolTranscriptProjection {
     }
     for (const [id, name] of missingTranscript) {
       const processId = params.retainedCommands?.get(id);
-      if (!processId) {
-        this.syntheticMissingResultIds.add(id);
-      }
       this.recordToolResult({
         id,
         name,
@@ -603,10 +599,6 @@ export class CodexToolTranscriptProjection {
     return missingCount === 1
       ? MISSING_TOOL_RESULT_ERROR
       : `${MISSING_TOOL_RESULT_ERROR} missingToolResultCount=${missingCount}`;
-  }
-
-  hasSyntheticMissingToolResult(toolCallId: string): boolean {
-    return this.syntheticMissingResultIds.has(toolCallId);
   }
 
   async readMirroredSessionMessages(signal?: AbortSignal): Promise<AgentMessage[]> {

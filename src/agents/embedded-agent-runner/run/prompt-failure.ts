@@ -212,7 +212,11 @@ export async function handleEmbeddedPromptFailure(input: {
   let rotated = false;
   if (failoverDecision.action === "rotate_profile") {
     if (promptFailoverReason === "rate_limit") {
-      rotated = await input.failover.advanceRateLimitAuthProfile();
+      rotated = await input.failover.advanceRateLimitAuthProfile({
+        failoverProvider: input.provider,
+        failoverModel: input.modelId,
+        logFallbackDecision: logFailoverDecision,
+      });
     } else {
       rotated = await input.failover.advanceAuthProfile();
     }
