@@ -20,10 +20,23 @@ export function activateGatewayAgentDatabaseStartup(params: {
   log: { info: (message: string) => void; warn: (message: string) => void };
 }): void {
   const broker = getSpawnBroker();
+  const startupConfig = params.getConfig();
   params.admission?.activate({
     isCurrent: params.isCurrent,
     prepareAgent: ({ agentId, paths, env, signal, assertCurrent }) =>
       runWithSpawnBroker(broker, async () => {
+        assertCurrent();
+        // Inspection also owns preserved stores; only configured targets need runtime preparation.
+        const preparationPaths = resolveConfiguredAgentDatabaseTargets(startupConfig, { env })
+          .filter(
+            (target) =>
+              target.agentId === agentId &&
+              paths.some((pathname) => isSameOpenClawAgentDatabasePath(target.path, pathname)),
+          )
+          .map((target) => target.path);
+        if (preparationPaths.length === 0) {
+          return;
+        }
         const [
           { runStartupSessionMigration },
           { refreshPreparedModelRuntimeSnapshots, getPreparedModelRuntimeSnapshot },
@@ -48,7 +61,7 @@ export function activateGatewayAgentDatabaseStartup(params: {
         );
         if (
           configuredPaths.length === 0 ||
-          paths.some(
+          preparationPaths.some(
             (pathname) =>
               !configuredPaths.some((target) =>
                 isSameOpenClawAgentDatabasePath(target.path, pathname),
