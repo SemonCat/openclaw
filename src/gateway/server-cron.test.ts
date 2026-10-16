@@ -2573,9 +2573,8 @@ describe("buildGatewayCronService", () => {
       expect(sendCronAnnouncePayloadStrictMock).toHaveBeenCalledExactlyOnceWith(
         expect.objectContaining({
           jobId: job.id,
-          payload: {
-            text: `queue changed\nInspect: https://gateway.example/control/automations?job=${job.id}&run=cron%3A${job.id}%3A${state.cron.getJob(job.id)?.state.lastRunAtMs}`,
-          },
+          payload: { text: "queue changed" },
+          inspectUrl: `https://gateway.example/control/automations?job=${job.id}&run=cron%3A${job.id}%3A${state.cron.getJob(job.id)?.state.lastRunAtMs}`,
           target: expect.objectContaining({ threadId: 456 }),
         }),
       );
@@ -2920,8 +2919,8 @@ describe("buildGatewayCronService", () => {
       expect(message).toContain("[redacted-url]");
       expect(message).not.toContain("opaque-secret-value");
       expect(message).not.toContain("https://private.example/device");
-      expect(message).toContain(
-        `\nInspect: https://gateway.example/control/automations?job=${job.id}&run=cron%3A${job.id}%3A${state.cron.getJob(job.id)?.state.lastRunAtMs}`,
+      expect(announcePayload.inspectUrl).toBe(
+        `https://gateway.example/control/automations?job=${job.id}&run=cron%3A${job.id}%3A${state.cron.getJob(job.id)?.state.lastRunAtMs}`,
       );
       expect(state.cron.getJob(job.id)?.state.lastRunStatus).toBe("ok");
       expect(state.cron.getJob(job.id)?.state.lastDeliveryStatus).toBe("delivered");
