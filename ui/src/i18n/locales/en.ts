@@ -92,6 +92,11 @@ export const en: TranslationMap & {
   sessionsView: TranslationMap;
   skillWorkshop: TranslationMap;
   systems: TranslationMap;
+  // Lazy en-approvals.ts and en-logbook.ts assign into these namespaces.
+  approvalPage: TranslationMap;
+  standingGrants: TranslationMap;
+  approvalHistory: TranslationMap;
+  logbook: TranslationMap;
   talkPage: TranslationMap;
   usage: TranslationMap & { overview: TranslationMap };
 } = {
@@ -1553,46 +1558,7 @@ export const en: TranslationMap & {
       ask: "Ask",
     },
   },
-  approvalPage: {
-    brandName: "OpenClaw",
-    eyebrow: "Operator approval",
-    loadingTitle: "Loading approval",
-    loadingDescription: "Checking the current approval state with the Gateway.",
-    unavailableTitle: "Approval unavailable",
-    unavailableDescription:
-      "This approval could not be found or this device is not authorized to review it.",
-    connectionErrorTitle: "Connection interrupted",
-    connectionErrorDescription:
-      "OpenClaw cannot confirm or record a decision while disconnected. Reconnect to check the current status.",
-    retry: "Retry",
-    execTitle: "Command approval",
-    pending: "Waiting for your decision",
-    pendingDescription: "Review the request carefully. The first answer from any surface wins.",
-    approvedHere: "Approved here",
-    deniedHere: "Denied here",
-    resolvedElsewhere: "Resolved elsewhere",
-    resolvedElsewhereDescription:
-      "Another surface or an earlier attempt recorded the decision first.",
-    approved: "Approved",
-    denied: "Denied",
-    expired: "Expired",
-    cancelled: "Cancelled",
-    allowedOnceDescription: "The operation was approved for this request only.",
-    allowedAlwaysDescription: "The operation was approved with the always-allow decision.",
-    deniedDescription: "The operation was denied and will not continue.",
-    expiredDescription: "No decision arrived before the deadline, so the operation was denied.",
-    cancelledDescription: "The requesting run ended before a decision could be used.",
-    summaryLabel: "Summary",
-    commandLabel: "Command",
-    requestLabel: "Request details",
-    nodeLabel: "Node",
-    expiresLabel: "Expires",
-    resolvedLabel: "Resolved",
-    actionsLabel: "Approval decisions",
-    resolvingDecision: "Recording {decision}…",
-    safeToClose: "The decision is recorded. You can close this page.",
-    openControlUi: "Open Control UI",
-  },
+  approvalPage: {},
   agentTools: {},
   skillGroups: {
     workspace: "Workspace Skills",
@@ -2411,57 +2377,7 @@ export const en: TranslationMap & {
     unavailableSubtitle:
       "The plugin that owns this tab is not active on the connected gateway, or it did not provide a panel.",
   },
-  logbook: {
-    nav: {
-      previousDay: "Previous day",
-      nextDay: "Next day",
-      today: "Today",
-    },
-    status: {
-      capturing: "Capturing every {seconds}s",
-      paused: "Capture paused",
-      disabled: "Capture off",
-      nodeHelp: "Device providing screen snapshots.",
-      pending: "{count} frames queued",
-      pendingHelp: "Snapshots waiting for the next analysis batch.",
-      analyzing: "Analyzing…",
-      captureError: "Capture error",
-      batchError: "Analysis error",
-      modelMissing: "No vision model",
-      modelMissingHelp:
-        "Set plugins.entries.logbook.config.visionModel or configure tools.media models.",
-    },
-    actions: {
-      pause: "Pause",
-      resume: "Resume",
-      analyzeNow: "Analyze now",
-    },
-    empty: {
-      title: "Nothing on the timeline yet.",
-      subtitle:
-        "Logbook is collecting snapshots; cards appear after the first analysis batch completes.",
-    },
-    card: {
-      keyframeAlt: "Screen snapshot from this activity",
-      distractions: "Distractions",
-    },
-    stats: {
-      title: "Day at a glance",
-      focus: "{pct}% focus",
-      tracked: "{duration} tracked",
-    },
-    standup: {
-      title: "Daily standup",
-      generate: "Generate",
-      refresh: "Regenerate",
-      empty: "Turn today's timeline into a ready-to-paste standup update.",
-    },
-    ask: {
-      title: "Ask your day",
-      placeholder: "When did I review the gateway PR?",
-      submit: "Ask",
-    },
-  },
+  logbook: {},
   board: {
     label: "Session dashboard",
     tabsLabel: "Dashboard tabs",
@@ -2598,72 +2514,8 @@ export const en: TranslationMap & {
   attention: {
     issues: "Inbox",
   },
-  standingGrants: {
-    title: "Standing grants",
-    description:
-      "Allow-always on an automation approval mints a standing grant for that exact command. Revoking one makes the next occurrence ask again.",
-    historyTitle: "Approval history",
-    empty: "No standing grants. Answer an automation approval with Always allow to mint one.",
-    stateUntilRevoked: "Until revoked",
-    stateExpiresIn: "Expires in {count}d",
-    stateExpired: "Expired",
-    stateRevoked: "Revoked",
-    revoke: "Revoke",
-    revoking: "Revoking…",
-    columns: {
-      automation: "Automation",
-      command: "Command",
-      uses: "Uses",
-      state: "State",
-    },
-  },
-  approvalHistory: {
-    description:
-      "Terminal exec, plugin, and system-agent approvals recorded by this gateway, newest first.",
-    loading: "Loading approval history…",
-    loadingMore: "Loading…",
-    loadMore: "Load more",
-    empty: "No resolved approvals in the rolling 30-day window.",
-    retention: "Approval history is a rolling 30-day window.",
-    offline: "Connect to the gateway to load approval history.",
-    invalidResponse: "The gateway returned an invalid approval history response.",
-    unknown: "Unknown",
-    notApplicable: "N/A",
-    columns: {
-      resolved: "Resolved",
-      kind: "Kind",
-      request: "Request",
-      decision: "Decision",
-      reason: "Resolution reason",
-      source: "Source agent / session",
-      resolver: "Resolver",
-    },
-    kinds: {
-      exec: "Exec",
-      plugin: "Plugin",
-      systemAgent: "System agent",
-    },
-    statuses: {
-      allowed: "Allowed",
-      denied: "Denied",
-      expired: "Expired",
-      cancelled: "Cancelled",
-    },
-    decisions: {
-      allowOnce: "Allow once",
-      allowAlways: "Always allow",
-      deny: "Deny",
-    },
-    reasons: {
-      user: "User decision",
-      timeout: "Timed out",
-      malformedVerdict: "Malformed verdict",
-      noRoute: "No route",
-      runAborted: "Run aborted",
-      gatewayRestart: "Gateway restart",
-      storageCorrupt: "Storage corrupt",
-    },
-  },
+  standingGrants: {},
+  approvalHistory: {},
   commandPalette: {},
   palette: {
     placeholder: "Search or start a task…",

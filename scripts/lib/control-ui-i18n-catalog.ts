@@ -5,6 +5,7 @@ import { buildBaseHints } from "../../src/config/schema.hints.js";
 import { configHintTranslationKey } from "../../ui/src/i18n/lib/config-hint-translation.ts";
 import { registerActivityEnglish } from "../../ui/src/i18n/locales/en-activity.ts";
 import { registerAgentsHomeEnglish } from "../../ui/src/i18n/locales/en-agents-home.ts";
+import { registerApprovalsEnglish } from "../../ui/src/i18n/locales/en-approvals.ts";
 import { registerAppsEnglish } from "../../ui/src/i18n/locales/en-apps.ts";
 import { registerBoardWebsiteEnglish } from "../../ui/src/i18n/locales/en-board-website.ts";
 import { registerBrowserEnglish } from "../../ui/src/i18n/locales/en-browser.ts";
@@ -24,6 +25,7 @@ import { registerFilePreviewEnglish } from "../../ui/src/i18n/locales/en-file-pr
 import { registerGitHubEnglish } from "../../ui/src/i18n/locales/en-github.ts";
 import { registerLabsEnglish } from "../../ui/src/i18n/locales/en-labs.ts";
 import { registerLinkReaderEnglish } from "../../ui/src/i18n/locales/en-link-reader.ts";
+import { registerLogbookEnglish } from "../../ui/src/i18n/locales/en-logbook.ts";
 import { registerLoginEnglish } from "../../ui/src/i18n/locales/en-login.ts";
 import { registerMcpAppEnglish } from "../../ui/src/i18n/locales/en-mcp-app.ts";
 import { registerMcpEnglish } from "../../ui/src/i18n/locales/en-mcp.ts";
@@ -70,6 +72,7 @@ const sourceFiles = [
   "en-activity.ts",
   "en-agents-home.ts",
   "en-apps.ts",
+  "en-approvals.ts",
   "en-board-website.ts",
   "en-browser.ts",
   "en-chat-camera.ts",
@@ -88,6 +91,7 @@ const sourceFiles = [
   "en-processes.ts",
   "en-labs.ts",
   "en-login.ts",
+  "en-logbook.ts",
   "en-link-reader.ts",
   "en-github.ts",
   "en-mcp.ts",
@@ -184,6 +188,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerActivityEnglish.catalog,
     registerAgentsHomeEnglish.catalog,
     registerAppsEnglish.catalog,
+    registerApprovalsEnglish.catalog,
     registerBrowserEnglish.catalog,
     registerChatCameraEnglish.catalog,
     registerChatCiEnglish.catalog,
@@ -197,6 +202,7 @@ export function loadControlUiSourceCatalog(): TranslationMap {
     registerProcessesEnglish.catalog,
     registerLabsEnglish.catalog,
     registerLoginEnglish.catalog,
+    registerLogbookEnglish.catalog,
     registerLinkReaderEnglish.catalog,
     registerMcpEnglish.catalog,
     registerMcpAppEnglish.catalog,

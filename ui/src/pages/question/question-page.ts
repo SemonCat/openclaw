@@ -22,11 +22,14 @@ import {
   type QuestionPrompt,
 } from "../../app/question-prompt.ts";
 import { t } from "../../i18n/index.ts";
+import { registerApprovalsEnglish } from "../../i18n/locales/en-approvals.ts";
 import { OpenClawLightDomElement } from "../../lit/openclaw-element.ts";
 import {
   createGatewayQuestionPanelProps,
   renderChatQuestionSummary,
 } from "../chat/components/chat-question-card.ts";
+
+registerApprovalsEnglish();
 
 type QuestionPageRequestError = "connection" | "unavailable" | null;
 

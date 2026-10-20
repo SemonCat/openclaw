@@ -123,6 +123,7 @@ vi.mock("./doctor-workspace.js", async (importOriginal) => {
   };
 });
 
+import { registerConversationRecallDoctorTests } from "./doctor-memory-search.conversation-recall.test-support.js";
 import {
   noteMemorySearchHealth,
   collectMemorySearchHealthFindings,
@@ -766,79 +767,7 @@ describe("noteMemorySearchHealth", () => {
     expect(note).not.toHaveBeenCalled();
   });
 
-  it("does not warn about conversation recall when the setting is off", async () => {
-    await runConversationRecallHealth(undefined, false, {});
-
-    expect(note).not.toHaveBeenCalled();
-  });
-
-  it("does not treat Lossless Claw's context-engine slot as a memory-slot conflict", async () => {
-    await runConversationRecallHealth({
-      slots: { contextEngine: "lossless-claw" },
-      entries: {
-        "active-memory": { enabled: true },
-        "lossless-claw": { enabled: true },
-      },
-    });
-
-    expect(note).not.toHaveBeenCalled();
-  });
-
-  it.each([
-    {
-      memoryProvider: "custom-memory",
-      activeMemoryConfig: { toolsAllow: ["memory_search"] },
-    },
-  ])(
-    "warns when the $memoryProvider provider lacks protected transcript recall",
-    async ({ memoryProvider, activeMemoryConfig }) => {
-      await runConversationRecallHealth({
-        slots: { memory: memoryProvider },
-        entries: {
-          "active-memory": {
-            enabled: true,
-            ...(activeMemoryConfig ? { config: activeMemoryConfig } : {}),
-          },
-        },
-      });
-
-      expect(firstNoteMessage()).toBe(
-        'Remember across conversations is effectively enabled for agent "personal", but the current memory provider does not support protected private transcript recall. Set memory.search.rememberAcrossConversations to false or use that provider\'s own recall path; advanced Active Memory can still use its recall tools.',
-      );
-    },
-  );
-
-  it("warns when conversation recall is enabled but Active Memory is disabled", async () => {
-    await runConversationRecallHealth({
-      entries: { "active-memory": { enabled: false } },
-    });
-
-    expect(firstNoteMessage()).toBe(
-      'Remember across conversations is effectively enabled for agent "personal", but the Active Memory plugin is disabled. Enable the plugin or set memory.search.rememberAcrossConversations to false.',
-    );
-  });
-
-  it("warns when conversation recall is enabled but Active Memory is paused in plugin config", async () => {
-    await runConversationRecallHealth({
-      entries: {
-        "active-memory": { enabled: true, config: { enabled: false } },
-      },
-    });
-
-    expect(firstNoteMessage()).toContain("Active Memory plugin is disabled");
-  });
-
-  it("warns when Active Memory excludes memory_search for conversation recall", async () => {
-    await runConversationRecallHealth({
-      entries: {
-        "active-memory": { enabled: true, config: { toolsAllow: ["memory_get"] } },
-      },
-    });
-
-    expect(firstNoteMessage()).toBe(
-      'Remember across conversations is effectively enabled for agent "personal", but Active Memory does not allow memory_search. Add memory_search to the plugin toolsAllow list or set memory.search.rememberAcrossConversations to false.',
-    );
-  });
+  registerConversationRecallDoctorTests({ note, firstNoteMessage, runConversationRecallHealth });
 
   it("warns when an opted-in agent has memory search disabled", async () => {
     const memoryCfg = {
@@ -1160,5 +1089,3 @@ describe("noteMemorySearchHealth", () => {
     expect(note).not.toHaveBeenCalled();
   });
 });
-
-/* oxlint-disable max-lines -- TODO: split this grandfathered oversized file. */

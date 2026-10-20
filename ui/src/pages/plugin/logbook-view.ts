@@ -4,10 +4,11 @@ import type { GatewayBrowserClient } from "../../api/gateway.ts";
 import { icons } from "../../components/icons.ts";
 import { toSanitizedMarkdownHtml } from "../../components/markdown.ts";
 import { t } from "../../i18n/index.ts";
+import { registerLogbookEnglish } from "../../i18n/locales/en-logbook.ts";
 import { formatDurationCompact } from "../../lib/format-duration.ts";
 import { formatUiExternalText } from "../../lib/format-error.ts";
-import { formatTimeMs } from "../../lib/format.ts";
 import "../../styles/logbook.css";
+import { formatTimeMs } from "../../lib/format.ts";
 import {
   askLogbook,
   configureLogbookPolling,
@@ -21,6 +22,8 @@ import {
   shiftDay,
 } from "./logbook-controller.ts";
 import type { LogbookCardPayload, LogbookStatusPayload, LogbookUiState } from "./logbook-types.ts";
+
+registerLogbookEnglish();
 
 type LogbookProps = {
   host: object;

@@ -1,4 +1,5 @@
 import type { GatewayBrowserClient } from "../../api/gateway.ts";
+import { registerLogbookEnglish } from "../../i18n/locales/en-logbook.ts";
 import { formatUiError, formatUiExternalText } from "../../lib/format-error.ts";
 import type {
   LogbookDaysPayload,
@@ -6,6 +7,8 @@ import type {
   LogbookTimelinePayload,
   LogbookUiState,
 } from "./logbook-types.ts";
+
+registerLogbookEnglish();
 
 const FRAME_PREVIEW_CACHE_LIMIT = 48;
 const POLL_INTERVAL_MS = 30_000;
