@@ -25,16 +25,24 @@ describe("provider failover hook structured signals", () => {
     providerRuntimeMocks.classifyProviderFailoverSignalWithPlugin.mockReset();
   });
 
-  it("explains a saved misalignment code without newer refusal diagnostics", () => {
-    const message = makeAssistantMessageFixture({
-      errorMessage: "This request was blocked by our safety systems.",
+  it.each([
+    {
       errorCode: "misalignment_policy_violation",
-      errorType: "invalid_request_error",
-      errorBody: '{"misalignment":{"detailed_explanation":"PRIVATE_FINDINGS ... [truncated]',
+      expected: "The provider stopped this request as a safety precaution (misalignment).",
+    },
+    {
+      errorCode: "cyber_policy",
+      expected:
+        "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
+    },
+  ])("explains saved $errorCode without newer refusal diagnostics", ({ errorCode, expected }) => {
+    const message = makeAssistantMessageFixture({
+      errorMessage: "PRIVATE_PROVIDER_DETAIL",
+      errorCode,
+      errorType: "invalid_request",
+      errorBody: '{"error":{"message":"PRIVATE_FINDINGS ... [truncated]',
     });
-    expect(formatUserFacingAssistantErrorText(message)).toBe(
-      "The provider stopped this request as a safety precaution (misalignment).",
-    );
+    expect(formatUserFacingAssistantErrorText(message)).toBe(expected);
   });
 
   it.each([

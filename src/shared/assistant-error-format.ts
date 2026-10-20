@@ -47,15 +47,18 @@ export function formatProviderRefusalText(message: {
         (diagnostic) => asOptionalRecord(diagnostic)?.type === "provider_refusal",
       )
     : undefined;
+  const category = asOptionalRecord(asOptionalRecord(refusal)?.details)?.category;
+  const safeCategory =
+    typeof category === "string" && /^[a-z0-9_-]{1,64}$/i.test(category) ? category : undefined;
+  if (safeCategory === "cyber" || (!refusal && message.errorCode === "cyber_policy")) {
+    return "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.";
+  }
   if (!refusal) {
     // Older transcripts retain the code but have no review findings or continuation state.
     return message.errorCode === "misalignment_policy_violation"
       ? "The provider stopped this request as a safety precaution (misalignment)."
       : undefined;
   }
-  const category = asOptionalRecord(asOptionalRecord(refusal)?.details)?.category;
-  const safeCategory =
-    typeof category === "string" && /^[a-z0-9_-]{1,64}$/i.test(category) ? category : undefined;
   if (safeCategory === "misalignment") {
     return "Chat stopped as a precaution. Review the findings in chat before continuing.";
   }
