@@ -35,6 +35,11 @@ describe("provider failover hook structured signals", () => {
       expected:
         "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
     },
+    {
+      errorCode: "content_filter",
+      expected:
+        "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+    },
   ])("explains saved $errorCode without newer refusal diagnostics", ({ errorCode, expected }) => {
     const message = makeAssistantMessageFixture({
       errorMessage: "PRIVATE_PROVIDER_DETAIL",
@@ -45,6 +50,50 @@ describe("provider failover hook structured signals", () => {
     expect(formatUserFacingAssistantErrorText(message)).toBe(expected);
   });
 
+  it("explains structured content filtering without exposing provider details", () => {
+    const message = makeAssistantMessageFixture({
+      errorMessage: "PRIVATE_PROVIDER_DETAIL",
+      errorBody: "PRIVATE_PROVIDER_BODY",
+      diagnostics: [
+        {
+          type: "openai_responses_terminal",
+          timestamp: 0,
+          details: {
+            eventType: "response.incomplete",
+            incompleteReason: "content_filter",
+          },
+        },
+      ],
+    });
+
+    expect(formatUserFacingAssistantErrorText(message)).toBe(
+      "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+    );
+  });
+
+  it("preserves specific refusal guidance when the terminal also reports content filtering", () => {
+    const message = makeAssistantMessageFixture({
+      errorCode: "content_filter",
+      errorMessage: "Provider incomplete_reason: content_filter",
+      diagnostics: [
+        {
+          type: "provider_refusal",
+          timestamp: 0,
+          details: { category: "misalignment" },
+        },
+        {
+          type: "openai_responses_terminal",
+          timestamp: 0,
+          details: { incompleteReason: "content_filter" },
+        },
+      ],
+    });
+
+    expect(formatUserFacingAssistantErrorText(message)).toBe(
+      "Chat stopped as a precaution. Review the findings in chat before continuing.",
+    );
+  });
+
   it.each([
     {
       errorMessage: MALFORMED_STREAMING_FRAGMENT_ERROR_MESSAGE,
@@ -53,6 +102,21 @@ describe("provider failover hook structured signals", () => {
     },
     {
       errorMessage: "opaque provider refusal",
+      copy: "⚠️ OpenClaw couldn't finish this reply. For details, open Settings → Logs in the Control UI or run `openclaw logs --follow` in your terminal.",
+      runtimeKind: "unclassified",
+    },
+    {
+      errorMessage: "Provider incomplete_reason: content_filter",
+      copy: "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+      runtimeKind: "unclassified",
+    },
+    {
+      errorMessage: "Provider finish_reason: content_filter",
+      copy: "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+      runtimeKind: "unclassified",
+    },
+    {
+      errorMessage: "PRIVATE_PROVIDER_DETAIL mentions content_filter",
       copy: "⚠️ OpenClaw couldn't finish this reply. For details, open Settings → Logs in the Control UI or run `openclaw logs --follow` in your terminal.",
       runtimeKind: "unclassified",
     },
