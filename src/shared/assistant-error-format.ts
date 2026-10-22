@@ -49,12 +49,29 @@ type ApiErrorInfo = {
 export function formatProviderRefusalText(message: {
   diagnostics?: unknown;
   errorCode?: unknown;
+  errorMessage?: unknown;
 }): string | undefined {
-  const refusal = Array.isArray(message.diagnostics)
-    ? message.diagnostics.find(
-        (diagnostic) => asOptionalRecord(diagnostic)?.type === "provider_refusal",
-      )
-    : undefined;
+  const diagnostics = Array.isArray(message.diagnostics) ? message.diagnostics : [];
+  const refusal = diagnostics.find(
+    (diagnostic) => asOptionalRecord(diagnostic)?.type === "provider_refusal",
+  );
+  if (
+    !refusal &&
+    (message.errorCode === "content_filter" ||
+      diagnostics.some((diagnostic) => {
+        const entry = asOptionalRecord(diagnostic);
+        return (
+          entry?.type === "openai_responses_terminal" &&
+          asOptionalRecord(entry.details)?.incompleteReason === "content_filter"
+        );
+      }) ||
+      (typeof message.errorMessage === "string" &&
+        /^Provider (?:incomplete_reason|finish_reason): content_filter$/.test(
+          message.errorMessage.trim(),
+        )))
+  ) {
+    return "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.";
+  }
   if (!refusal) {
     // Older transcripts retain the code but have no review findings or continuation state.
     return message.errorCode === "misalignment_policy_violation"

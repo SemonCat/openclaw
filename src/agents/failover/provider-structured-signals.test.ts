@@ -25,15 +25,67 @@ describe("provider failover hook structured signals", () => {
     providerRuntimeMocks.classifyProviderFailoverSignalWithPlugin.mockReset();
   });
 
-  it("explains a saved misalignment code without newer refusal diagnostics", () => {
-    const message = makeAssistantMessageFixture({
-      errorMessage: "This request was blocked by our safety systems.",
+  it.each([
+    {
       errorCode: "misalignment_policy_violation",
-      errorType: "invalid_request_error",
-      errorBody: '{"misalignment":{"detailed_explanation":"PRIVATE_FINDINGS ... [truncated]',
+      expected: "The provider stopped this request as a safety precaution (misalignment).",
+    },
+    {
+      errorCode: "content_filter",
+      expected:
+        "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+    },
+  ])("explains saved $errorCode without newer refusal diagnostics", ({ errorCode, expected }) => {
+    const message = makeAssistantMessageFixture({
+      errorMessage: "PRIVATE_PROVIDER_DETAIL",
+      errorCode,
+      errorType: "invalid_request",
+      errorBody: '{"error":{"message":"PRIVATE_FINDINGS ... [truncated]',
     });
+    expect(formatUserFacingAssistantErrorText(message)).toBe(expected);
+  });
+
+  it("explains structured content filtering without exposing provider details", () => {
+    const message = makeAssistantMessageFixture({
+      errorMessage: "PRIVATE_PROVIDER_DETAIL",
+      errorBody: "PRIVATE_PROVIDER_BODY",
+      diagnostics: [
+        {
+          type: "openai_responses_terminal",
+          timestamp: 0,
+          details: {
+            eventType: "response.incomplete",
+            incompleteReason: "content_filter",
+          },
+        },
+      ],
+    });
+
     expect(formatUserFacingAssistantErrorText(message)).toBe(
-      "The provider stopped this request as a safety precaution (misalignment).",
+      "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+    );
+  });
+
+  it("preserves specific refusal guidance when the terminal also reports content filtering", () => {
+    const message = makeAssistantMessageFixture({
+      errorCode: "content_filter",
+      errorMessage: "Provider incomplete_reason: content_filter",
+      diagnostics: [
+        {
+          type: "provider_refusal",
+          timestamp: 0,
+          details: { category: "misalignment" },
+        },
+        {
+          type: "openai_responses_terminal",
+          timestamp: 0,
+          details: { incompleteReason: "content_filter" },
+        },
+      ],
+    });
+
+    expect(formatUserFacingAssistantErrorText(message)).toBe(
+      "Chat stopped as a precaution. Review the findings in chat before continuing.",
     );
   });
 
@@ -45,6 +97,21 @@ describe("provider failover hook structured signals", () => {
     },
     {
       errorMessage: "opaque provider refusal",
+      copy: "⚠️ OpenClaw couldn't finish this reply. For details, open Settings → Logs in the Control UI or run `openclaw logs --follow` in your terminal.",
+      runtimeKind: "unclassified",
+    },
+    {
+      errorMessage: "Provider incomplete_reason: content_filter",
+      copy: "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+      runtimeKind: "unclassified",
+    },
+    {
+      errorMessage: "Provider finish_reason: content_filter",
+      copy: "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again.",
+      runtimeKind: "unclassified",
+    },
+    {
+      errorMessage: "PRIVATE_PROVIDER_DETAIL mentions content_filter",
       copy: "⚠️ OpenClaw couldn't finish this reply. For details, open Settings → Logs in the Control UI or run `openclaw logs --follow` in your terminal.",
       runtimeKind: "unclassified",
     },
