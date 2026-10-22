@@ -19,6 +19,7 @@ import type { ChannelProgressDraftCompositorSnapshot } from "../../channels/prog
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import type { MessageActionAuthorization } from "../../gateway/message-action-turn-capability.js";
 import type { OutboundMediaAccess } from "../../media/load-options.js";
+import type { InputProvenance } from "../../sessions/input-provenance.js";
 import type { GatewayClientMode, GatewayClientName } from "../../utils/message-channel.js";
 import type { DeliverOutboundPayloadsParams } from "./deliver-contracts.js";
 import type { ConversationDeliveryTarget } from "./delivery-completion.js";
@@ -118,6 +119,7 @@ export type MessageActionInput = Pick<
   sandboxContainerWorkdir?: string;
   dryRun?: boolean;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
+  inputProvenance?: InputProvenance;
   /** The run answers another session, so an internal sink write reaches only its transcript. */
   sourceReplyTranscriptOnly?: boolean;
   sourceReplyFinal?: boolean;
