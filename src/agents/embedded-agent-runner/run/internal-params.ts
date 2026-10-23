@@ -10,6 +10,7 @@ import type { BoundAgentRunSessionTarget } from "../../run-session-target.types.
 import type { CompactionRequestBudget } from "../../sessions/compaction/request-budget.js";
 import type { SystemAgentToolOptions } from "../../tools/system-agent-tool.js";
 import type { DeferredEmbeddedRunLifecycleOwner } from "./deferred-lifecycle-owner.js";
+import type { UndeliveredExecCompletion } from "./exec-completion-delivery-context.js";
 import type { RunEmbeddedAgentParams } from "./params.js";
 import type { EmbeddedRunCompletionCheck } from "./terminal-retry-state.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
@@ -44,7 +45,7 @@ export type RunEmbeddedAgentInternalParams = RunEmbeddedAgentParams & {
   /** Reply owner rechecks current send policy before an exec delivery decision pass. */
   canRecoverExecCompletionDelivery?: () => boolean;
   /** Host-only bounded continuation; its message tool stays source-bound. */
-  execCompletionDeliveryRecovery?: true;
+  execCompletionDeliveryRecovery?: UndeliveredExecCompletion;
   preparedTtsPreferences?: PreparedTtsPreferences;
   /** Fail-closed caller input admission against the actual prepared model, before dispatch. */
   assertModelInput?: (model: Pick<Model, "input">) => void;

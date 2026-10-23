@@ -64,6 +64,8 @@ export function tryRecoverExecCompletionDelivery(input: {
     }) ||
     resolveSourceReplyDelivery(attempt, input.prepared.replyDeliveryState) !== "missing" ||
     isHeartbeatAcknowledgementText(input.prepared.finalAssistantVisibleText) ||
+    !input.attemptAssistant ||
+    !input.prepared.finalAssistantVisibleText ||
     retryState.execCompletionDeliveryAttempts >= 1
   ) {
     return false;
@@ -71,7 +73,12 @@ export function tryRecoverExecCompletionDelivery(input: {
   // A private final is not permission to send it. Restrict this same-run pass
   // to a source-bound tool decision; its ordinary output remains private.
   retryState.execCompletionDeliveryAttempts += 1;
-  runParams.execCompletionDeliveryRecovery = true;
+  runParams.execCompletionDeliveryRecovery = {
+    timestamp: input.attemptAssistant.timestamp,
+    responseId: input.attemptAssistant.responseId,
+    turnId: input.attemptAssistant.turnId,
+    visibleText: input.prepared.finalAssistantVisibleText,
+  };
   runParams.toolsAllow = ["message"];
   runParams.disableToolSearch = true;
   runParams.codeModeOverride = false;

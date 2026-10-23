@@ -1,5 +1,6 @@
 import "../test-utils/prepare-compiled-subprocesses.js";
 import { afterAll, beforeAll, expect, it, vi } from "vitest";
+import { buildOpenAIResponsesParams } from "../../packages/ai/src/transports/openai-responses-params-internal.js";
 import { createMessageReceiptFromOutboundResults } from "../channels/message/receipt.js";
 import type {
   ChannelMessageActionContext,
@@ -9,6 +10,7 @@ import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import type { SessionEntry } from "../config/sessions/types.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
+import type { AssistantMessage, Context } from "../llm/types.js";
 import {
   captureActivePluginRegistrySnapshot,
   restoreActivePluginRegistrySnapshot,
@@ -22,13 +24,25 @@ import {
 } from "../test-utils/channel-plugins.js";
 import { createOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { normalizeSessionDeliveryState } from "../utils/delivery-context.shared.js";
+import { toToolDefinitions } from "./agent-tool-definition-adapter.js";
 import { readEmbeddedMessageDeliveryFact } from "./embedded-agent-message-delivery.js";
+import { submitEmbeddedAttemptPrompt } from "./embedded-agent-runner/run/attempt-prompt-submit.js";
+import { createBaseInput } from "./embedded-agent-runner/run/attempt-prompt-submit.test-support.js";
 import { createAttemptSetupFixture } from "./embedded-agent-runner/run/attempt-setup.test-support.js";
 import type { EmbeddedRunAttemptInternalParams } from "./embedded-agent-runner/run/internal-params.js";
 import type {
   EmbeddedRunAttemptParams,
   EmbeddedRunAttemptResult,
 } from "./embedded-agent-runner/run/types.js";
+import { dropReasoningFromHistory } from "./embedded-agent-runner/thinking.js";
+import {
+  createAssistant,
+  createAssistantResultStream,
+  createTestSession,
+  registerAgentSessionLoopTestLifecycle,
+  streamMocks,
+} from "./sessions/agent-session-loop-correctness.test-support.js";
+import { SessionManager } from "./sessions/session-manager.js";
 import {
   buildEmbeddedRunnerAssistant,
   createEmbeddedAgentRunnerOpenAiConfig,
@@ -43,6 +57,8 @@ import type { ToolErrorSummary } from "./tool-error-summary.js";
 import { attachToolAllowlistIntersection } from "./tool-policy.js";
 import { readToolResultDetails } from "./tool-result-error.js";
 import { jsonResult } from "./tools/common.js";
+
+registerAgentSessionLoopTestLifecycle();
 
 const infer = vi.fn<(params: EmbeddedRunAttemptParams) => Promise<EmbeddedRunAttemptResult>>();
 let runEmbeddedAgent: typeof import("./embedded-agent-runner/run.js").runEmbeddedAgent;
@@ -132,6 +148,7 @@ type Scenario = {
   denyAtSend?: boolean;
   toolsAllow?: string[];
   lastToolError?: ToolErrorSummary;
+  providerRecovery?: boolean;
 };
 const privateNotes =
   "The old background check is superseded by a newer result that was already reported. " +
@@ -140,6 +157,12 @@ const privateNotes =
 
 it.each<Scenario>([
   { name: "success", attempts: 2, notify: true },
+  {
+    name: "private final mistaken for delivered",
+    attempts: 2,
+    notify: true,
+    providerRecovery: true,
+  },
   {
     name: "actionable failure",
     attempts: 2,
@@ -213,6 +236,7 @@ it.each<Scenario>([
         ? "The requested checks passed. The background work is complete and the result is ready."
         : "The required check failed. The user needs to fix the reported error before continuing.");
     const notification = `New result: ${privateFinal}`;
+    let privateAssistant: AssistantMessage | undefined;
     infer.mockImplementation(async (params) => {
       const tools = await prepareTools({
         attempt: params as EmbeddedRunAttemptInternalParams,
@@ -281,7 +305,7 @@ it.each<Scenario>([
         }
         const shouldSend = scenario.delivered || (isRecovery && scenario.notify);
         let delivered = false;
-        if (shouldSend) {
+        if (shouldSend && !scenario.providerRecovery) {
           const delivery = await message!.execute("deliver-completion", {
             action: "send",
             message: notification,
@@ -298,10 +322,114 @@ it.each<Scenario>([
           });
           delivered = fact?.sourceReplyDelivered === true;
         }
+        if (isRecovery && scenario.providerRecovery) {
+          const manager = SessionManager.inMemory();
+          const prefix = {
+            role: "user" as const,
+            content: "Wait for the check result.",
+            timestamp: 1,
+          };
+          await manager.appendMessageAsync(prefix);
+          await manager.appendMessageAsync(privateAssistant!);
+          const { session } = await createTestSession({
+            sessionManager: manager,
+            customTools: toToolDefinitions([message!]),
+          });
+          const originalBranch = structuredClone(manager.getBranch());
+          session.agent.state.messages = dropReasoningFromHistory(session.messages);
+          const preparedFinal = structuredClone(session.messages[1]);
+          const requests: Context[] = [];
+          const payloads: ReturnType<typeof buildOpenAIResponsesParams>[] = [];
+          streamMocks.streamSimple.mockImplementation((model, context) => {
+            requests.push({
+              ...context,
+              messages: structuredClone(context.messages),
+              tools: context.tools?.map(({ name, description, parameters }) => ({
+                name,
+                description,
+                parameters,
+              })),
+            });
+            payloads.push(buildOpenAIResponsesParams(model, context, undefined));
+            // Reproduce the observed provider mistake: assistant history is
+            // interpreted as an answer already sent to the source conversation.
+            const alreadyAnswered = context.messages.some(
+              (entry) =>
+                entry.role === "assistant" &&
+                entry.content.some((part) => part.type === "text" && part.text === privateFinal),
+            );
+            const sent = context.messages.some((entry) => entry.role === "toolResult");
+            return createAssistantResultStream(
+              createAssistant(
+                model,
+                alreadyAnswered || sent
+                  ? [{ type: "text", text: "NO_REPLY" }]
+                  : [
+                      {
+                        type: "toolCall",
+                        id: "deliver-completion",
+                        name: "message",
+                        arguments: {
+                          action: "send",
+                          target: params.currentMessagingTarget,
+                          message: notification,
+                        },
+                      },
+                    ],
+                alreadyAnswered || sent ? "stop" : "toolUse",
+              ),
+            );
+          });
+          await submitEmbeddedAttemptPrompt({
+            ...createBaseInput(),
+            attempt: params,
+            activeSession: session,
+            appendContext: undefined,
+            prependContext: undefined,
+            modelPrompt: params.prompt,
+            transcriptPrompt: params.prompt,
+            runtimeOnly: true,
+            promptActiveSession: (prompt, options) => session.prompt(prompt, options),
+          });
+          expect(requests.length, "the external inference fixture must execute").toBeGreaterThan(0);
+          expect(
+            posts,
+            "the undelivered completion must reach the source message tool",
+          ).toHaveBeenCalledTimes(1);
+          expect(requests).toHaveLength(2);
+          expect(requests[0]?.tools?.map((tool) => tool.name)).toEqual(["message"]);
+          expect(requests[0]?.messages[0]).toEqual(prefix);
+          expect(JSON.stringify(payloads[0]?.input)).toContain("UNDELIVERED private result");
+          expect(JSON.stringify(payloads)).not.toContain("private-recovery-reasoning");
+          expect(requests[0]?.messages[1]).toMatchObject({
+            role: "user",
+            content: expect.stringContaining(JSON.stringify({ undeliveredResult: privateFinal })),
+          });
+          expect(session.messages[1]).toEqual(preparedFinal);
+          expect(JSON.stringify(manager.getBranch().slice(0, originalBranch.length))).toBe(
+            JSON.stringify(originalBranch),
+          );
+          const receipt = session.messages.find((entry) => entry.role === "toolResult");
+          const fact = readEmbeddedMessageDeliveryFact(
+            receipt?.role === "toolResult"
+              ? readToolResultDetails(receipt)?.messageDelivery
+              : undefined,
+          );
+          expect(fact).toMatchObject({ status: "settled", sourceReplyDelivered: true });
+          delivered = fact?.sourceReplyDelivered === true;
+        }
         const text = delivered || isRecovery ? (scenario.recoveryText ?? "NO_REPLY") : privateFinal;
         const assistant = buildEmbeddedRunnerAssistant({
-          content: [{ type: "text", text }],
+          content: [
+            ...(scenario.providerRecovery && !isRecovery
+              ? [{ type: "thinking" as const, thinking: "private-recovery-reasoning" }]
+              : []),
+            { type: "text", text },
+          ],
         });
+        if (!isRecovery) {
+          privateAssistant = assistant;
+        }
         return makeEmbeddedRunnerAttempt({
           sessionIdUsed: sessionId,
           assistantTexts: [text],

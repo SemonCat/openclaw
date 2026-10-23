@@ -305,7 +305,7 @@ export async function prepareEmbeddedAttemptToolBase(params: {
         codeModeSkills,
         installedSkills: params.installedSkills,
         preparedModelRuntime: attempt.preparedModelRuntime,
-        sourceReplyOnly: attempt.execCompletionDeliveryRecovery,
+        sourceReplyOnly: attempt.execCompletionDeliveryRecovery ? true : undefined,
         sourceReplyDeliveryAllowed: attempt.execCompletionDeliveryRecovery
           ? () => attempt.canRecoverExecCompletionDelivery?.() === true
           : undefined,
