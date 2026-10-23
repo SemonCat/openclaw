@@ -26,6 +26,7 @@ import {
   resolveCommandTurnContext,
 } from "../command-turn-context.js";
 import { resolveEnvelopeFormatOptions } from "../envelope.js";
+import { isExecCompletionTurn } from "../internal-turn-source.js";
 import { normalizeThinkLevel } from "../thinking.js";
 import { SILENT_REPLY_TOKEN } from "../tokens.js";
 import { applySessionHints } from "./body.js";
@@ -57,6 +58,7 @@ import {
 import { resolveSessionStableReplyMode } from "./session-stable-reply-mode.js";
 import {
   isInternalSourceReplyChannel,
+  resolveSourceReplyDeliveryMode,
   resolveSourceReplyExpectation,
 } from "./source-reply-delivery-mode.js";
 import { shouldApplyStartupContext, buildSessionStartupContextPrelude } from "./startup-context.js";
@@ -118,8 +120,13 @@ export async function prepareReplyRunContext(params: RunPreparedReplyParams) {
   const inboundEventKind = promptSessionCtx.InboundEventKind;
   const isInternalPromptChannel = isInternalSourceReplyChannel(promptSessionCtx);
   const sourceReplyDeliveryMode =
-    inboundEventKind === "room_event" && !isInternalPromptChannel
-      ? "message_tool_only"
+    (inboundEventKind === "room_event" || isExecCompletionTurn(promptSessionCtx)) &&
+    !isInternalPromptChannel
+      ? resolveSourceReplyDeliveryMode({
+          cfg,
+          ctx: promptSessionCtx,
+          requested: opts?.sourceReplyDeliveryMode,
+        })
       : isInternalPromptChannel && opts?.sourceReplyDeliveryMode === undefined
         ? "automatic"
         : opts?.sourceReplyDeliveryMode;
@@ -130,10 +137,12 @@ export async function prepareReplyRunContext(params: RunPreparedReplyParams) {
   // Synthetic turns must not fall back to their effective turn mode: a
   // response-tool heartbeat's message_tool_only is per-turn enforcement, not
   // session policy, and hashing it recreates the ping-pong.
-  const isSyntheticTurn = isSyntheticSourceReplyTurn({
-    inputProvenance: promptSessionCtx.InputProvenance,
-    isHeartbeat,
-  });
+  const isSyntheticTurn =
+    isExecCompletionTurn(promptSessionCtx) ||
+    isSyntheticSourceReplyTurn({
+      inputProvenance: promptSessionCtx.InputProvenance,
+      isHeartbeat,
+    });
   const sessionPromptSourceReplyDeliveryMode =
     opts?.sessionPromptSourceReplyDeliveryMode ??
     (isSyntheticTurn && sessionEntry

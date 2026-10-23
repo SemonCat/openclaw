@@ -31,6 +31,55 @@ function expectPolicyFields(
 }
 
 describe("resolveSourceReplyDeliveryMode", () => {
+  it.each([
+    {
+      InternalTurnSource: "event",
+      InputProvenance: { kind: "internal_system", sourceTool: "exec" },
+    },
+    { InternalTurnSource: "exec" },
+    {
+      InternalTurnSource: "heartbeat",
+      InputProvenance: { kind: "internal_system", sourceTool: "exec-event" },
+    },
+  ] as const)(
+    "keeps external exec prose private for $InternalTurnSource despite availability or requested mode",
+    (source) => {
+      for (const messageToolAvailable of [true, false]) {
+        for (const requested of [undefined, "automatic", "message_tool_only"] as const) {
+          const policy = resolveSourceReplyVisibilityPolicy({
+            cfg: emptyConfig,
+            ctx: { Provider: "mattermost", Surface: "mattermost", ...source },
+            requested,
+            messageToolAvailable,
+            sendPolicy: "allow",
+          });
+          expect(policy).toMatchObject({
+            sourceReplyDeliveryMode: "message_tool_only",
+            sessionStableSourceReplyDeliveryMode: "automatic",
+            suppressAutomaticSourceDelivery: true,
+            suppressHookUserDelivery: true,
+          });
+        }
+      }
+    },
+  );
+
+  it.each([
+    { Provider: "webchat", InputProvenance: { kind: "internal_system", sourceTool: "exec" } },
+    { Provider: "mattermost", InputProvenance: { kind: "external_user", sourceTool: "exec" } },
+    { Provider: "mattermost", InputProvenance: { kind: "internal_system", sourceTool: "plugin" } },
+    { Provider: "mattermost", InputProvenance: { kind: "internal_system", sourceTool: "cron" } },
+  ] as const)("preserves automatic delivery for other sources: %j", (ctx) => {
+    expect(
+      resolveSourceReplyDeliveryMode({
+        cfg: emptyConfig,
+        ctx,
+        requested: "automatic",
+        messageToolAvailable: false,
+      }),
+    ).toBe("automatic");
+  });
+
   it("keeps progress refresh replies, hooks and typing silent without changing session reply mode", () => {
     const policy = resolveSourceReplyVisibilityPolicy({
       cfg: emptyConfig,
