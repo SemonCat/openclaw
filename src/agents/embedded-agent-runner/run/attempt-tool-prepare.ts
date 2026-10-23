@@ -1,6 +1,7 @@
 import type { SessionPermissionMode } from "../../../../packages/gateway-protocol/src/schema/sessions-row.js";
 import { getReplyOperationSessionReader } from "../../../auto-reply/reply/reply-run-registry.state.js";
 import { messageToolOwnsVisibleReply } from "../../../auto-reply/source-reply-delivery-mode.js";
+import { composeSessionSourceAssertion } from "../../../config/sessions/session-source-authority.js";
 import type { DiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import { isEmbeddedMode } from "../../../infra/embedded-mode.js";
 import {
@@ -304,6 +305,10 @@ export async function prepareEmbeddedAttemptToolBase(params: {
         codeModeSkills,
         installedSkills: params.installedSkills,
         preparedModelRuntime: attempt.preparedModelRuntime,
+        sourceReplyOnly: attempt.execCompletionDeliveryRecovery,
+        sourceReplyDeliveryAllowed: attempt.execCompletionDeliveryRecovery
+          ? () => attempt.canRecoverExecCompletionDelivery?.() === true
+          : undefined,
         requireWorkspaceOnly: attempt.requireWorkspaceOnly,
         sessionReadScopeKey: attempt.sessionReadScopeKey,
         sessionConfigSource: attempt.oneShotCliRun ? "pinned" : "runtime",
@@ -362,6 +367,10 @@ export async function prepareEmbeddedAttemptToolBase(params: {
           : undefined,
         onYield: params.onYield,
       };
+      const assertAdmittedRunCurrent = resolveAdmittedRunActiveAssertion(
+        attempt.admittedRunContext,
+        abortSignal,
+      );
       const allTools = await createOpenClawCodingToolsInternalAsync(
         codingToolOptions,
         params.skillReadResources,
@@ -369,7 +378,16 @@ export async function prepareEmbeddedAttemptToolBase(params: {
         undefined,
         {
           reader: getReplyOperationSessionReader(attempt.replyOperation),
-          assertCurrent: resolveAdmittedRunActiveAssertion(attempt.admittedRunContext, abortSignal),
+          assertCurrent: attempt.execCompletionDeliveryRecovery
+            ? composeSessionSourceAssertion([
+                assertAdmittedRunCurrent,
+                () => {
+                  if (attempt.canRecoverExecCompletionDelivery?.() !== true) {
+                    throw new Error("Exec completion source delivery is no longer permitted.");
+                  }
+                },
+              ])
+            : assertAdmittedRunCurrent,
         },
       );
       // The built-in harness retains its existing authoritative wrappers.

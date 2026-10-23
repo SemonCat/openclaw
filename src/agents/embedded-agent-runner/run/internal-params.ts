@@ -41,6 +41,10 @@ export type CompactionAccountingFact = Readonly<
 >;
 
 export type RunEmbeddedAgentInternalParams = RunEmbeddedAgentParams & {
+  /** Reply owner rechecks current send policy before an exec delivery decision pass. */
+  canRecoverExecCompletionDelivery?: () => boolean;
+  /** Host-only bounded continuation; its message tool stays source-bound. */
+  execCompletionDeliveryRecovery?: true;
   preparedTtsPreferences?: PreparedTtsPreferences;
   /** Fail-closed caller input admission against the actual prepared model, before dispatch. */
   assertModelInput?: (model: Pick<Model, "input">) => void;
@@ -83,7 +87,13 @@ export type RunEmbeddedAgentInternalParams = RunEmbeddedAgentParams & {
 };
 
 export type EmbeddedRunAttemptInternalParams = EmbeddedRunAttemptParams &
-  Pick<RunEmbeddedAgentInternalParams, "onContextAccountingEvent" | "onCompactionRequestBudget"> & {
+  Pick<
+    RunEmbeddedAgentInternalParams,
+    | "onContextAccountingEvent"
+    | "onCompactionRequestBudget"
+    | "canRecoverExecCompletionDelivery"
+    | "execCompletionDeliveryRecovery"
+  > & {
     /** The dispatch owner already selected this target, including any compaction successor. */
     preparedSessionTarget?: {
       readonly target: Readonly<BoundAgentRunSessionTarget & SessionTranscriptTargetBinding>;

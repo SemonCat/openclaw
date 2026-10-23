@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
+import type { SessionEntry } from "../../config/sessions/types.js";
 import { SqliteWorkerError } from "../../infra/sqlite-worker-contract.js";
 import type { TemplateContext } from "../templating.js";
 import type { GetReplyOptions } from "../types.js";
@@ -21,6 +22,22 @@ import type { InternalGetReplyOptions } from "./get-reply.types.js";
 const state = await setupAgentRunnerExecutionTestState();
 
 describe("executeAgentTurn: message tool progress", () => {
+  it("rechecks the current session send policy for exec delivery recovery", async () => {
+    let entry: SessionEntry = { sessionId: "policy-recheck", updatedAt: 1 };
+    state.runEmbeddedAgentMock.mockImplementationOnce(async (params: EmbeddedAgentParams) => {
+      expect(params.canRecoverExecCompletionDelivery?.()).toBe(true);
+      entry = { ...entry, sendPolicy: "deny" };
+      expect(params.canRecoverExecCompletionDelivery?.()).toBe(false);
+      return { payloads: [], meta: {} };
+    });
+    const executeAgentTurn = await getExecuteAgentTurnForTest();
+    await executeAgentTurn({
+      ...createMinimalRunAgentTurnParams(),
+      getActiveSessionEntry: () => entry,
+    });
+    expect(state.runEmbeddedAgentMock).toHaveBeenCalledTimes(1);
+  });
+
   it("suppresses progress callbacks after message-tool-only delivery completes", async () => {
     let releaseItemEvent: (() => void) | undefined;
     const itemEventGate = new Promise<void>((resolve) => {
