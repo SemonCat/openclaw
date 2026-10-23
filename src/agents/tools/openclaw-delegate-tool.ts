@@ -13,6 +13,7 @@ import { withPreparedExecDefaults } from "../exec-defaults.preparation.js";
 import type { OpenClawToolsOptions } from "../openclaw-tools.types.js";
 import { runOutsidePreparedModelRuntimePluginGenerationScope } from "../prepared-model-runtime-generation-scope.js";
 import type { PreparedToolConstruction } from "../tool-construction-preparation.js";
+import { DEFAULT_ASK_USER_TIMEOUT_SECONDS } from "./ask-user-tool-normalization.js";
 import { jsonResult, readToolStringParam, type AnyAgentTool } from "./common.js";
 import { withGatewayToolCallerIdentity } from "./gateway-caller-context.js";
 import { callInProcessGatewayTool } from "./in-process-gateway.js";
@@ -141,18 +142,24 @@ export function createOpenClawDelegateToolsForRun(
       const result = await withGatewayToolCallerIdentity(caller, () =>
         runOutsidePreparedModelRuntimePluginGenerationScope(() =>
           runOutsidePluginRuntimeGenerationScope(() =>
-            callInProcessGatewayTool<OpenClawDelegateResult>("openclaw.chat", {
-              sessionId,
-              message,
-              delegation: {
-                agentId: options.sessionAgentId,
-                ...(sessionKey ? { sessionKey } : {}),
-                ...(options.agentChannel ? { turnSourceChannel: options.agentChannel } : {}),
-                ...(turnSourceTo ? { turnSourceTo } : {}),
-                ...(options.agentAccountId ? { turnSourceAccountId: options.agentAccountId } : {}),
-                ...(turnSourceThreadId !== undefined ? { turnSourceThreadId } : {}),
+            callInProcessGatewayTool<OpenClawDelegateResult>(
+              "openclaw.chat",
+              {
+                sessionId,
+                message,
+                delegation: {
+                  agentId: options.sessionAgentId,
+                  ...(sessionKey ? { sessionKey } : {}),
+                  ...(options.agentChannel ? { turnSourceChannel: options.agentChannel } : {}),
+                  ...(turnSourceTo ? { turnSourceTo } : {}),
+                  ...(options.agentAccountId
+                    ? { turnSourceAccountId: options.agentAccountId }
+                    : {}),
+                  ...(turnSourceThreadId !== undefined ? { turnSourceThreadId } : {}),
+                },
               },
-            }),
+              { timeoutMs: DEFAULT_ASK_USER_TIMEOUT_SECONDS * 1_000 },
+            ),
           ),
         ),
       );

@@ -76,7 +76,20 @@ In the Control UI, an open automation refreshes its next-run time and condition 
 
 ### Conversational management
 
-An authenticated channel sender explicitly listed in `commands.ownerAllowFrom`, or a Control UI administrator with `operator.admin`, can ask the agent to list, inspect, update, run, or remove any existing automation on that Gateway, regardless of its creator or channel. For example, ask it to disable a reminder created in Telegram. This matches the administrator's authority on the **Automations** page. Create command payloads through the operator CLI or Gateway API.
+An authenticated channel sender explicitly listed in `commands.ownerAllowFrom`, or a Control UI administrator with `operator.admin`, can ask the agent to list, inspect (including execution history), update, run, or remove any existing automation on that Gateway, regardless of its creator or channel. For example, ask it to disable a reminder created in Telegram. This matches the administrator's authority on the **Automations** page. Create command payloads through the operator CLI or Gateway API.
+
+When a manual run needs verification, keep the returned `runId` and use the
+`automations` tool with `action: "runs"`, the same `jobId` and `runId`, and
+`waitSeconds: 60`. It waits in the current conversation for that exact run's
+terminal history record, including after a one-shot job auto-deletes its definition. A wait timeout does not cancel or re-run the job; check
+the same run again if needed. Inspect delivery status and the summary as well as
+execution status before reporting that anything was sent.
+
+Do not create a second automation merely to query another job's `get` or `runs`.
+Scheduled agent turns only have self-management authority, including jobs using
+`sessionTarget: "current"`; copied conversation context does not transfer the
+original sender's administrator authority. Use the original job's configured
+completion delivery for unattended notifications.
 
 Fresh authenticated Control UI administrator turns can also create ordinary automations through chat, including recurring agent turns in the current conversation with `timeoutSeconds: 0`. Creation keeps the caller's account/session ownership and captured tool restrictions. Remote administration does not grant local-host or provider-read authority, or permission to capture fresh configured-MCP execution authority. An incomplete tool capture still prevents inheriting an uncaptured tool surface.
 

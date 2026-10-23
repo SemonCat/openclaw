@@ -82,6 +82,70 @@ describe("sendCronAnnouncePayloadStrict", () => {
     });
   });
 
+  it.each([
+    {
+      channel: "mattermost",
+      inspectUrl: "https://gateway.example/control/(team)/automations?job=job-1",
+      expectedText:
+        "Automation failed\n\n[查看執行紀錄](<https://gateway.example/control/(team)/automations?job=job-1>)",
+    },
+    {
+      channel: "telegram",
+      inspectUrl: "https://gateway.example/control/(team)/automations?job=job-1",
+      expectedText:
+        "Automation failed\nInspect: https://gateway.example/control/(team)/automations?job=job-1",
+    },
+    {
+      channel: "mattermost",
+      inspectUrl: "https://gateway.example/control/team name",
+      expectedText: "Automation failed\nInspect: https://gateway.example/control/team name",
+    },
+    {
+      channel: "mattermost",
+      inspectUrl: "https://gateway.example/control/team>name",
+      expectedText: "Automation failed\nInspect: https://gateway.example/control/team>name",
+    },
+    {
+      channel: "mattermost",
+      inspectUrl: "https://gateway.example/control/team\nname",
+      expectedText: "Automation failed\nInspect: https://gateway.example/control/team\nname",
+    },
+  ])(
+    "renders the inspect footer for resolved $channel with $inspectUrl",
+    async ({ channel, inspectUrl, expectedText }) => {
+      mocks.resolveDeliveryTarget.mockResolvedValueOnce({
+        ok: true,
+        channel,
+        to: "123",
+        mode: "explicit",
+      });
+      const payload: Parameters<typeof sendCronAnnouncePayloadStrict>[0]["payload"] = {
+        text: "Automation failed",
+        presentation: { blocks: [{ type: "text", text: "Original details" }] },
+      };
+      Object.freeze(payload);
+
+      await send({ target: { channel: "last", to: "123" }, payload, inspectUrl });
+
+      expect(mocks.deliverOutboundPayloads).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          channel,
+          payloads: [
+            {
+              text: expectedText,
+              presentation: { blocks: [{ type: "text", text: "Original details" }] },
+            },
+          ],
+        }),
+        undefined,
+      );
+      expect(payload).toEqual({
+        text: "Automation failed",
+        presentation: { blocks: [{ type: "text", text: "Original details" }] },
+      });
+    },
+  );
+
   it.each(["topic", "global"])(
     "mirrors confirmed command output into its %s conversation",
     async (scope) => {

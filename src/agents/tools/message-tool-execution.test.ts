@@ -36,6 +36,7 @@ import { createMockPluginRegistry } from "../../plugins/hooks.test-fixtures.js";
 import { resetPluginRuntimeStateForTest, setActivePluginRegistry } from "../../plugins/runtime.js";
 import {
   createChannelTestPluginBase,
+  createDirectOutboundTestAdapter,
   createTestRegistry,
 } from "../../test-utils/channel-plugins.js";
 import { readEmbeddedMessageDeliveryFact } from "../embedded-agent-message-delivery.js";
@@ -68,6 +69,191 @@ const secretDeps = {
   NonNullable<Parameters<typeof createMessageTool>[0]>,
   "getScopedChannelsCommandSecretTargets" | "resolveCommandSecretRefsViaGateway"
 >;
+
+describe("inter-session current-source routing", () => {
+  afterEach(() => resetPluginRuntimeStateForTest());
+
+  const parentSessionKey = "agent:main:mattermost:channel:coordination";
+  const requesterSessionKey = `${parentSessionKey}:thread:request`;
+
+  function createRoutingFixture(
+    options: Partial<NonNullable<Parameters<typeof createMessageTool>[0]>> = {},
+    channel = "mattermost",
+  ) {
+    const handleAction = vi.fn(async ({ params }: ChannelMessageActionContext) =>
+      jsonResult({ ok: true, messageId: "coordination-message", channelId: params.to }),
+    );
+    const sendText = vi.fn(async () => ({ channel, messageId: "adapter-message" }));
+    const plugin: ChannelPlugin = {
+      ...createChannelTestPluginBase({ id: channel }),
+      outbound: { ...createDirectOutboundTestAdapter({ channel }), sendText },
+      messaging: {
+        targetIdComparison: "case-sensitive",
+        targetResolver: { looksLikeId: () => true },
+      },
+      actions: {
+        describeMessageTool: () => ({ actions: ["send"] }),
+        handleAction,
+      },
+    };
+    setActivePluginRegistry(createTestRegistry([{ pluginId: plugin.id, source: "test", plugin }]));
+    const tool = createMessageTool({
+      config: {
+        agents: { entries: { main: {} } },
+        channels: { [channel]: { enabled: true } },
+      },
+      preparedMessageToolCatalog: EMPTY_CATALOG,
+      currentChannelProvider: "webchat",
+      agentSessionKey: parentSessionKey,
+      sourceReplyDeliveryMode: "message_tool_only",
+      ...options,
+      ...secretDeps,
+    });
+    return { tool, handleAction, sendText };
+  }
+
+  it.each([
+    {
+      name: "Mattermost thread requester",
+      channel: "mattermost",
+      sessionKey: parentSessionKey,
+      sourceSessionKey: requesterSessionKey,
+    },
+    {
+      name: "missing requester key",
+      channel: "mattermost",
+      sessionKey: parentSessionKey,
+      sourceSessionKey: undefined,
+    },
+    {
+      name: "another agent with the same channel key",
+      channel: "mattermost",
+      sessionKey: parentSessionKey,
+      sourceSessionKey: "agent:other:mattermost:channel:coordination",
+    },
+    {
+      name: "case-distinct Matrix room",
+      channel: "matrix",
+      sessionKey: "agent:main:matrix:channel:!Room:server",
+      sourceSessionKey: "agent:main:matrix:channel:!room:server",
+    },
+    {
+      name: "case-distinct Signal group",
+      channel: "signal",
+      sessionKey: "agent:main:signal:group:AbCdEf",
+      sourceSessionKey: "agent:main:signal:group:abcdef",
+    },
+  ])(
+    "keeps $name coordination replies private",
+    async ({ channel, sessionKey, sourceSessionKey }) => {
+      const { tool, handleAction, sendText } = createRoutingFixture(
+        {
+          agentSessionKey: sessionKey,
+          inputProvenance: {
+            kind: "inter_session",
+            sourceSessionKey,
+            sourceTool: "sessions_send",
+          },
+        },
+        channel,
+      );
+
+      const result = await tool.execute("coordination-reply", {
+        action: "send",
+        message: "Coordination task finished.",
+        final: false,
+      });
+
+      expect(handleAction).not.toHaveBeenCalled();
+      expect(sendText).not.toHaveBeenCalled();
+      expect(result.details).toMatchObject({
+        channel: "webchat",
+        target: "current-run",
+        sourceReplySink: "internal-ui",
+        sourceReply: { text: "Coordination task finished." },
+      });
+      expect(result.content).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            type: "text",
+            text: expect.stringContaining("did not deliver it to an external channel"),
+          }),
+        ]),
+      );
+    },
+  );
+
+  it.each<{
+    name: string;
+    options: Partial<NonNullable<Parameters<typeof createMessageTool>[0]>>;
+    args?: Record<string, unknown>;
+    target?: string;
+  }>([
+    {
+      name: "human inbound channel defaults",
+      options: {
+        currentChannelProvider: "mattermost",
+        currentChannelId: "coordination",
+        inputProvenance: { kind: "external_user" },
+      },
+    },
+    { name: "ambient dashboard route recovery", options: {} },
+    ...[
+      parentSessionKey,
+      "mattermost:channel:coordination",
+      "  agent:MAIN:mattermost:channel:coordination  ",
+    ].map((sourceSessionKey) => ({
+      name: `same-session sessions_send from ${sourceSessionKey.trim()}`,
+      options: {
+        inputProvenance: {
+          kind: "inter_session" as const,
+          sourceTool: "sessions_send",
+          sourceSessionKey,
+        },
+      },
+    })),
+    ...["subagent_announce", "subagent_settle"].map((sourceTool) => ({
+      name: sourceTool,
+      options: {
+        inputProvenance: {
+          kind: "inter_session" as const,
+          sourceTool,
+          sourceSessionKey: "agent:main:subagent:worker",
+        },
+      },
+    })),
+    {
+      name: "explicit proactive destination during coordination",
+      options: {
+        inputProvenance: {
+          kind: "inter_session",
+          sourceTool: "sessions_send",
+          sourceSessionKey: requesterSessionKey,
+        },
+      },
+      args: { channel: "mattermost", target: "proactive" },
+      target: "proactive",
+    },
+  ])("preserves external sends for $name", async ({ options, args, target }) => {
+    const { tool, handleAction, sendText } = createRoutingFixture(options);
+    const result = await tool.execute("external-reply", {
+      action: "send",
+      message: "External reply.",
+      final: false,
+      ...args,
+    });
+
+    expect(handleAction).toHaveBeenCalledTimes(1);
+    expect(handleAction).toHaveBeenCalledWith(
+      expect.objectContaining({
+        channel: "mattermost",
+        params: expect.objectContaining({ to: target ?? "coordination" }),
+      }),
+    );
+    expect(sendText).not.toHaveBeenCalled();
+    expect(result.details).toMatchObject({ ok: true, channelId: target ?? "coordination" });
+  });
+});
 
 describe("registered message action source completion", () => {
   afterEach(() => resetPluginRuntimeStateForTest());

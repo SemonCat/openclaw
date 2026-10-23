@@ -99,6 +99,7 @@ describe("sendGatewayCronFailureAlert presentation", () => {
       name: "without a public origin",
       gateway: undefined,
       expectedText: "cron failed\nRun started: 2026-01-15 10:30 EST",
+      expectedInspectUrl: undefined,
     },
     {
       name: "with a public origin",
@@ -106,12 +107,13 @@ describe("sendGatewayCronFailureAlert presentation", () => {
         publicOrigin: "https://gateway.example",
         controlUi: { basePath: "/control" },
       },
-      expectedText:
-        "cron failed\nRun started: 2026-01-15 10:30 EST\nInspect: https://gateway.example/control/automations?job=job-1&run=cron%3Ajob-1%3A1768491000000",
+      expectedText: "cron failed\nRun started: 2026-01-15 10:30 EST",
+      expectedInspectUrl:
+        "https://gateway.example/control/automations?job=job-1&run=cron%3Ajob-1%3A1768491000000",
     },
   ])(
     "composes failure alert details $name without dropping presentation",
-    async ({ gateway, expectedText }) => {
+    async ({ gateway, expectedText, expectedInspectUrl }) => {
       const job = makeCronJob({
         delivery: {
           mode: "announce",
@@ -152,6 +154,7 @@ describe("sendGatewayCronFailureAlert presentation", () => {
 
       expect(mocks.sendCronAnnouncePayloadStrict).toHaveBeenCalledWith(
         expect.objectContaining({
+          inspectUrl: expectedInspectUrl,
           payload: {
             text: expectedText,
             presentation: {

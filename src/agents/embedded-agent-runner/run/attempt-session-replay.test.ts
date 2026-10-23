@@ -33,6 +33,7 @@ import { SessionManager } from "../../sessions/session-manager.js";
 import {
   appendCompletedToolWork,
   appendOversizedCacheSnapshot,
+  withDirectlyAdmittedTurn,
   withInterruptedTurn,
   withReplaySession,
 } from "./attempt-session-replay.test-support.js";
@@ -94,6 +95,45 @@ describe("context engine bootstrap", () => {
       { settledPrefix: true },
     );
   });
+});
+
+describe("redacted direct admission replay", () => {
+  const credential = "synthetic-fixture-value-for-redaction";
+
+  it.each([false, true])(
+    "dispatches the admitted user once after storage redaction (selected=%s)",
+    async (selectedOwner) => {
+      await withDirectlyAdmittedTurn(
+        `Finish this exact turn\n\nQuoted thread: https://example.invalid/oauth?token=${credential}`,
+        async (fixture) => {
+          const users = () =>
+            loadTranscriptEventsSync(fixture.target).filter(
+              (entry) => (entry as { message?: { role?: string } }).message?.role === "user",
+            );
+          const admitted = users();
+          expect(admitted).toHaveLength(1);
+          expect(JSON.stringify(admitted)).not.toContain(credential);
+          // Re-resolving the unstaged source restores bytes that admission redacted.
+          expect(
+            JSON.stringify(await fixture.attempt.userTurnTranscriptRecorder!.resolveMessage()),
+          ).toContain(credential);
+          await withReplaySession(fixture, false, async (session, submit) => {
+            streamMocks.streamSimple.mockImplementation((model) =>
+              createAssistantResultStream(
+                createAssistant(model, [{ type: "text", text: "Continued after admission" }]),
+              ),
+            );
+            await submit();
+            expect(Reflect.get(session.messages.at(-1)!, "errorMessage")).toBeUndefined();
+            expect(streamMocks.streamSimple).toHaveBeenCalledOnce();
+            expect(session.getLastAssistantText()).toBe("Continued after admission");
+          });
+          expect(users()).toEqual(admitted);
+        },
+        { selectedOwner },
+      );
+    },
+  );
 });
 
 describe("interrupted canonical user replay", () => {
