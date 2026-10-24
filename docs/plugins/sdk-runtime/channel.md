@@ -9,6 +9,24 @@ sidebarTitle: "Channel helpers"
 
 Channel-specific runtime helpers, available when a channel plugin is loaded. Part of the [Plugin runtime helpers](/plugins/sdk-runtime) reference; [Channel plugins](/plugins/sdk-channel-plugins) is the step-by-step guide.
 
+Hosts advertising `queued-source-lifecycle-v1` in `api.runtime.capabilities`
+retain `replyOptions.queuedDeliveryCorrelations` for each queued source
+message, including messages combined by collect mode. Keep `begin()` and its
+optional cleanup for delivery ownership. Optional `onAdmitted()`,
+`onToolStart({ name, toolCallId })`, and
+`onSettled({ dispatchError, anyReplyDelivered })` callbacks track that source's
+activity even when a newer turn owns the drain's presentation callbacks.
+Tool activity carries no arguments or result text and does not count as reply
+delivery. Settlement follows terminal delivery handling; deferred admission
+does not activate or settle a source. Deliberate silence reports no delivery
+and no dispatch error. Notifications require allowed delivery, a non-room-event
+source, and current source authority. Observer failures are best effort and do
+not stop execution or other sources' notifications. Older hosts may only call
+`begin()`, so plugins must keep ordinary run lifecycle handling. On capable
+hosts, use source lifecycle notifications for reactions; legacy
+`onQueuedFollowupAdmitted` and `onQueuedFollowupSettled` remain owned by the
+refreshed renderer and may refer to another source.
+
 ## Channel namespaces
 
 <AccordionGroup>

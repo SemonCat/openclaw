@@ -22,6 +22,7 @@ import { buildTerminalAgentRunFailureReplyPayload } from "./agent-runner-failure
 import { resolveFollowupCurrentMessageId } from "./agent-runner-utils.js";
 import { resolveTurnCommentaryProgressOwner } from "./commentary-progress-owner.js";
 import { requiresDurableToolResultDelivery } from "./dispatch-from-config.payloads.js";
+import { notifyQueuedFollowupDeliveryCorrelations } from "./followup-presentation.js";
 import type { AdmittedFollowupTurn, FollowupRunnerParams } from "./followup-turn-admission.js";
 import type { InternalGetReplyOptions } from "./get-reply.types.js";
 import { drainPendingToolTasks } from "./pending-tool-task-drain.js";
@@ -284,6 +285,10 @@ export async function executeFollowupTurn(params: {
         baseTypingSignals.signalExecutionActivity ?? baseTypingSignals.signalRunStart,
       ),
   };
+  const renderToolStart = wrapVisibility(sourceOpts?.onToolStart, shouldEmitToolLifecycle);
+  const observeToolStart = turn.queued.deliveryCorrelations?.some(
+    (correlation) => correlation.onToolStart,
+  );
   const progressOpts: InternalGetReplyOptions = {
     ...sourceOpts,
     isHeartbeat,
@@ -306,7 +311,19 @@ export async function executeFollowupTurn(params: {
     onPreparedBlockReply: undefined,
     onPartialReply: undefined,
     onAssistantMessageStart: undefined,
-    onToolStart: wrapVisibility(sourceOpts?.onToolStart, shouldEmitToolLifecycle),
+    onToolStart: observeToolStart
+      ? async (event) => {
+          if (event.phase === undefined || event.phase === "start") {
+            await enqueueProgress(() =>
+              notifyQueuedFollowupDeliveryCorrelations(turn, (correlation) =>
+                correlation.onToolStart?.({ name: event.name, toolCallId: event.toolCallId }),
+              ),
+            );
+          }
+          // Activity alone is not evidence that reply content reached the conversation.
+          return renderToolStart ? renderToolStart(event) : false;
+        }
+      : renderToolStart,
     onCommandOutput: wrapVisibility(sourceOpts?.onCommandOutput, shouldEmitStructuredProgress),
     onItemEvent: wrapVisibility<Parameters<NonNullable<InternalGetReplyOptions["onItemEvent"]>>>(
       sourceOpts?.onItemEvent ? (item) => sourceOpts.onItemEvent!(item) : undefined,

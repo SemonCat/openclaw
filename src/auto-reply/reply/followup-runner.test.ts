@@ -98,6 +98,7 @@ function createTurn(
 ) {
   const operation = {
     result,
+    abortSignal: new AbortController().signal,
     complete: vi.fn(() => order.push("operation-complete")),
     fail: vi.fn(() => order.push("operation-failed")),
   };
@@ -161,6 +162,107 @@ beforeEach(() => {
 });
 
 describe("createFollowupRunner", () => {
+  it("does not terminalize the source when an admitted attempt must retry", async () => {
+    const turn = createTurn();
+    const onAdmitted = vi.fn();
+    const onSettled = vi.fn();
+    turn.queued.deliveryCorrelations = [{ begin: () => {}, onAdmitted, onSettled }];
+    const failure = new Error("pre-execution retry");
+    state.admit.mockResolvedValue({ kind: "admitted", turn });
+    state.execute.mockRejectedValue(failure);
+    await expect(
+      createFollowupRunner({
+        typing: createTypingController(),
+        typingMode: "never",
+        defaultModel: "claude",
+      })(turn.queued),
+    ).rejects.toBe(failure);
+    expect(onAdmitted).toHaveBeenCalledOnce();
+    expect(onSettled).not.toHaveBeenCalled();
+    expect(state.completeLifecycle).not.toHaveBeenCalled();
+  });
+
+  it.each([false, true])(
+    "settles the queued source after terminal delivery (transport failure=%s)",
+    async (fails) => {
+      const order: string[] = [];
+      const turn = createTurn(order);
+      const admitted = vi.fn(() => {
+        order.push("source-admitted");
+      });
+      const settled = vi.fn(() => {
+        order.push("source-settled");
+      });
+      turn.queued.deliveryCorrelations = [
+        {
+          begin: () => () => order.push("source-end"),
+          onAdmitted: admitted,
+          onSettled: settled,
+        },
+      ];
+      turn.queued.queuedFollowupReplyDisposition = {
+        kind: "deliver",
+        deliver: async () => {
+          order.push("source-delivery");
+          if (fails) {
+            throw new Error("transport failed");
+          }
+        },
+      };
+      state.admit.mockResolvedValue({ kind: "admitted", turn });
+      state.execute.mockResolvedValue(createSettledExecution());
+      state.deliver.mockResolvedValue({ kind: "completed", payloads: [{ text: "done" }] });
+      await createFollowupRunner({
+        typing: createTypingController(),
+        typingMode: "never",
+        defaultModel: "claude",
+      })(turn.queued);
+      expect(admitted).toHaveBeenCalledOnce();
+      expect(settled).toHaveBeenCalledExactlyOnceWith({
+        dispatchError: fails,
+        anyReplyDelivered: !fails,
+      });
+      expect(order).toEqual([
+        "source-admitted",
+        "source-delivery",
+        ...(fails ? ["operation-failed"] : []),
+        "source-settled",
+        "source-end",
+        "operation-complete",
+      ]);
+    },
+  );
+
+  it.each(["deferred", "deny", "room_event"] as const)(
+    "does not activate source lifecycle for %s",
+    async (gate) => {
+      const onAdmitted = vi.fn();
+      const onSettled = vi.fn();
+      const turn = createTurn();
+      turn.queued.deliveryCorrelations = [{ begin: () => {}, onAdmitted, onSettled }];
+      if (gate === "deferred") {
+        state.admit.mockResolvedValue({ kind: "deferred", reason: "active-run" });
+      } else {
+        turn.sendPolicy = gate === "deny" ? "deny" : "allow";
+        turn.queued.currentInboundEventKind = gate === "room_event" ? "room_event" : undefined;
+        state.admit.mockResolvedValue({ kind: "admitted", turn });
+        state.execute.mockResolvedValue(createSettledExecution());
+      }
+      const run = createFollowupRunner({
+        typing: createTypingController(),
+        typingMode: "never",
+        defaultModel: "claude",
+      })(turn.queued);
+      if (gate === "deferred") {
+        await expect(run).rejects.toBeInstanceOf(FollowupRunDeferredError);
+      } else {
+        await run;
+      }
+      expect(onAdmitted).not.toHaveBeenCalled();
+      expect(onSettled).not.toHaveBeenCalled();
+    },
+  );
+
   it.each([true, false])(
     "publishes admission notices only for consumed execution (admission succeeds=%s)",
     async (succeeds) => {

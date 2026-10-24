@@ -680,6 +680,35 @@ describe("resolveFollowupDeliveryDecision", () => {
 });
 
 describe("deliverFollowupDecision", () => {
+  it.each([
+    { result: { ok: true, delivered: true }, delivered: true, failed: false },
+    { result: { ok: false, delivered: false, error: "offline" }, delivered: false, failed: true },
+    { result: { ok: true, delivered: false, suppressed: true }, delivered: false, failed: false },
+    {
+      result: { ok: false, delivered: false, queueCustody: "held" },
+      delivered: false,
+      failed: false,
+    },
+  ])(
+    "records source delivery facts from the origin route: $result",
+    async ({ result, delivered, failed }) => {
+      const onDelivery = vi.fn();
+      const onDeliveryError = vi.fn();
+      deliveryState.routeReply.mockResolvedValue(result);
+      await deliverFollowupDecision({
+        decision: { kind: "deliver", payloads: [{ text: "reply" }] },
+        turn: createTurn(),
+        defaults: { ...createDefaults(vi.fn()), opts: undefined },
+        runId: "source-run",
+        runFollowup: vi.fn(),
+        onDelivery,
+        onDeliveryError,
+      });
+      expect(onDelivery).toHaveBeenCalledTimes(delivered ? 1 : 0);
+      expect(onDeliveryError).toHaveBeenCalledTimes(failed ? 1 : 0);
+    },
+  );
+
   it("retains the event source delivery owner through progress and final settlement", async () => {
     const source = vi.fn(async () => {});
     const laterDispatcher = vi.fn(async () => {});

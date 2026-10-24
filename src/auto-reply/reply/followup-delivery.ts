@@ -354,6 +354,8 @@ async function sendFollowupPayloads(params: {
   kind: ReplyDispatchKind;
   mirror?: boolean;
   resolved?: { provider: string; model: string };
+  onDelivery?: () => void;
+  onDeliveryError?: () => void;
 }): Promise<ReplyPayload[]> {
   const { turn, defaults } = params;
   const { originatingChannel, originatingTo } = turn.queued;
@@ -398,6 +400,7 @@ async function sendFollowupPayloads(params: {
   const fallbackDispatcher = sourceDisposition ? undefined : defaults.opts?.onBlockReply;
   const dispatcherAvailable = Boolean(deliverQueuedBatch || fallbackDispatcher);
   if (!originRoutable && !dispatcherAvailable) {
+    params.onDeliveryError?.();
     defaultRuntime.error?.(
       "followup queue: completed with payloads but no origin route or visible dispatcher is available",
     );
@@ -486,13 +489,20 @@ async function sendFollowupPayloads(params: {
         logVerbose(`followup queue: route-reply failed: ${routeError}`);
         if (sameChannelOrigin && dispatcherAvailable) {
           await dispatchPayload(payload);
+          if (!deliverQueuedBatch) {
+            params.onDeliveryError?.();
+          }
         } else if (dispatcherAvailable) {
+          params.onDeliveryError?.();
           crossChannelFailures.push(payload);
         } else {
+          params.onDeliveryError?.();
           defaultRuntime.error?.(`followup queue: route-reply failed: ${routeError}`);
         }
       } else if (result.delivered) {
+        params.onDelivery?.();
         if (!result.ok) {
+          params.onDeliveryError?.();
           logVerbose(
             `followup queue: route-reply partially failed after delivery: ${
               result.error ?? "unknown error"
@@ -525,6 +535,7 @@ async function sendFollowupPayloads(params: {
       payloads: queuedPayloads,
       completion: { kind: "progress" },
     });
+    params.onDelivery?.();
   }
   return queuedPayloads;
 }
@@ -540,6 +551,8 @@ export async function deliverFollowupDecision(params: {
   runId: string;
   runFollowup: (run: FollowupRun) => Promise<void>;
   kind?: ReplyDispatchKind;
+  onDelivery?: () => void;
+  onDeliveryError?: () => void;
 }): Promise<FollowupDeliveryResult> {
   const { decision, turn, defaults } = params;
   if (decision.kind === "suppress") {
@@ -603,6 +616,8 @@ export async function deliverFollowupDecision(params: {
     mirror:
       decision.kind === "deliver" && params.kind && params.kind !== "final" ? false : undefined,
     resolved: decision.resolved,
+    onDelivery: params.onDelivery,
+    onDeliveryError: params.onDeliveryError,
   });
   return { kind: "completed", payloads: delivered };
 }

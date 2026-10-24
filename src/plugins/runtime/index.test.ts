@@ -99,6 +99,7 @@ describe("plugin runtime command execution", () => {
     const runtime = createPluginRuntime();
     expect(runtime.version).toBe(VERSION);
     expect(runtime.capabilities).toContain("sender-restricted-hidden-helpers-v1");
+    expect(runtime.capabilities).toContain("queued-source-lifecycle-v1");
     expect(Object.isFrozen(runtime.capabilities)).toBe(true);
   });
 

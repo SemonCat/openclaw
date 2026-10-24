@@ -87,6 +87,14 @@ export type TaskSuggestionDeliveryMode = "gateway";
 /** Correlates queued reply ownership transfer with later delivery drains. */
 export type QueuedReplyDeliveryCorrelation = {
   begin: () => (() => void) | void;
+  /** Source-message activity, independent of the refreshed drain's renderer. */
+  onAdmitted?: () => Promise<void> | void;
+  onToolStart?: (event: { name?: string; toolCallId?: string }) => Promise<void> | void;
+  /** Delivery facts for this admitted source, after terminal transport handling. */
+  onSettled?: (outcome: {
+    dispatchError: boolean;
+    anyReplyDelivered: boolean;
+  }) => Promise<void> | void;
 };
 
 /**

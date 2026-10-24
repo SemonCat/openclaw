@@ -17,7 +17,10 @@ export function createRuntimeBase(): Pick<
 > {
   let system: PluginRuntime["system"] | undefined;
   return {
-    capabilities: Object.freeze([GATEWAY_SERVER_CAPS.SENDER_RESTRICTED_HIDDEN_HELPERS]),
+    capabilities: Object.freeze([
+      GATEWAY_SERVER_CAPS.SENDER_RESTRICTED_HIDDEN_HELPERS,
+      "queued-source-lifecycle-v1",
+    ]),
     config: createRuntimeConfig(),
     // Only the registry proxy grants storage, never the base runtime directly.
     state: {

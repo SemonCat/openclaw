@@ -78,6 +78,86 @@ afterEach(() => {
 });
 
 describe("queued turn callback ownership", () => {
+  it("carries collected source activity through the real queue and execution into settlement", async ({
+    signal,
+  }) => {
+    const finished = createDeferred();
+    const order: string[] = [];
+    const renderer = vi.fn(async () => true);
+    const sources = ["first", "second"].map((id) => ({
+      begin: vi.fn(() => () => {
+        order.push(`${id}:end`);
+      }),
+      onAdmitted: vi.fn(() => {
+        order.push(`${id}:admitted`);
+      }),
+      onToolStart: vi.fn(() => {
+        order.push(`${id}:tool`);
+      }),
+      onSettled: vi.fn(() => {
+        order.push(`${id}:settled`);
+        if (id === "second") {
+          finished.resolve();
+        }
+      }),
+    }));
+    state.execute.mockImplementation(async (params: AgentTurnParams) => {
+      await params.opts?.onToolStart?.({
+        name: "exec",
+        phase: "start",
+        toolCallId: "call-1",
+        args: { command: "private" },
+      });
+      expect(await params.resolveVisibleReplyDelivery?.()).toBe(false);
+      return { runId: "collected-run", outcome: { kind: "aborted", reason: "user" } };
+    });
+    const runner = createFollowupRunner({
+      typing: createFollowupTurnTestTypingController(),
+      typingMode: "never",
+      defaultModel: "gpt-test",
+      opts: { onToolStart: renderer },
+    });
+    for (const [index, source] of sources.entries()) {
+      const run = createQueueTestRun({
+        prompt: `source-${index}`,
+        messageId: `source-${index}`,
+        originatingChannel: "mattermost",
+        originatingTo: "channel:C1",
+        originatingThreadId: "thread-1",
+      });
+      run.run.sessionKey = key;
+      run.run.verboseLevelOverride = "off";
+      run.deliveryCorrelations = [source];
+      expect(enqueueFollowupRun(key, run, createQueueSettings(), "none", runner, false)).toBe(true);
+    }
+    scheduleFollowupDrain(key, runner);
+    await withinTest(finished.promise, signal);
+    await vi.runAllTimersAsync();
+    expect(state.execute).toHaveBeenCalledOnce();
+    expect(renderer).not.toHaveBeenCalled();
+    for (const source of sources) {
+      expect(source.onToolStart).toHaveBeenCalledExactlyOnceWith({
+        name: "exec",
+        toolCallId: "call-1",
+      });
+      expect(source.onSettled).toHaveBeenCalledExactlyOnceWith({
+        dispatchError: false,
+        anyReplyDelivered: false,
+      });
+    }
+    expect(order).toEqual([
+      "first:admitted",
+      "second:admitted",
+      "first:tool",
+      "second:tool",
+      "first:settled",
+      "second:settled",
+      "second:end",
+      "first:end",
+    ]);
+    expect(getExistingFollowupQueue(key)).toBeUndefined();
+  });
+
   it.for(["before drain", "enqueue during drain", "deferred restart"] as const)(
     "keeps each queued item's observers through %s",
     async (scenario, { signal }) => {

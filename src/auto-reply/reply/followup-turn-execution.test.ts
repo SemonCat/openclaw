@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { awaitGateBeforeSettlement, createDeferred } from "../../../test/helpers/promise.js";
+import { createAdmittedRunOperatorAuthority } from "../../agents/admitted-run-context.js";
 import { createAgentRunRestartAbortError } from "../../agents/run-termination.js";
 import type { ReplyPayload } from "../types.js";
 import type { AgentTurnExecutionResult, AgentTurnParams } from "./agent-runner-execution.types.js";
@@ -96,6 +97,79 @@ async function runFastAutoProgressCase(params: {
 }
 
 describe("executeFollowupTurn", () => {
+  it("notifies collected source tool observers when the refreshed renderer hides progress", async () => {
+    const first = vi.fn(async () => {
+      throw new Error("source presentation failed");
+    });
+    const second = vi.fn(async () => {});
+    const otherSource = vi.fn(async () => true);
+    const turn = createTurn();
+    turn.queued.deliveryCorrelations = [
+      { begin: () => {}, onToolStart: first },
+      { begin: () => {}, onToolStart: second },
+    ];
+    turn.queued.run.verboseLevelOverride = "off";
+    state.execute.mockImplementation(async (params: AgentTurnParams) => {
+      await params.opts?.onToolStart?.({
+        name: "exec",
+        phase: "start",
+        toolCallId: "call-1",
+        args: { command: "private command" },
+      });
+      expect(await params.resolveVisibleReplyDelivery?.()).toBe(false);
+      return { runId: "run-1", outcome: { kind: "rejected", payload: { text: "done" } } };
+    });
+
+    const result = await executeTestTurn({
+      turn,
+      defaults: { opts: { onToolStart: otherSource } },
+    });
+    await result.progress.drain();
+    expect(first).toHaveBeenCalledExactlyOnceWith({ name: "exec", toolCallId: "call-1" });
+    expect(second).toHaveBeenCalledExactlyOnceWith({ name: "exec", toolCallId: "call-1" });
+    expect(otherSource).not.toHaveBeenCalled();
+  });
+
+  it.each(["deny", "room_event", "abort", "revoked"] as const)(
+    "keeps source tool observers silent after %s",
+    async (gate) => {
+      const onToolStart = vi.fn();
+      const turn = createTurn();
+      let revoked = false;
+      turn.queued.deliveryCorrelations = [{ begin: () => {}, onToolStart }];
+      if (gate === "deny") {
+        turn.sendPolicy = "deny";
+      }
+      if (gate === "room_event") {
+        turn.queued.currentInboundEventKind = "room_event";
+      }
+      const abort = new AbortController();
+      turn.queued.abortSignal = abort.signal;
+      state.execute.mockImplementation(async (params: AgentTurnParams) => {
+        if (gate === "abort") {
+          abort.abort();
+        }
+        revoked = true;
+        if (gate === "revoked") {
+          turn.queued.operatorAuthority = createAdmittedRunOperatorAuthority({
+            profileId: "source",
+            scopes: ["operator.write"],
+            assertCurrent() {
+              if (revoked) {
+                throw new Error("revoked");
+              }
+            },
+          });
+        }
+        await params.opts?.onToolStart?.({ name: "exec", phase: "start" });
+        return { runId: "run-1", outcome: { kind: "rejected", payload: { text: "done" } } };
+      });
+      const result = await executeTestTurn({ turn });
+      await result.progress.drain();
+      expect(onToolStart).not.toHaveBeenCalled();
+    },
+  );
+
   it("refreshes the eligible queued turn from its current personal profile", async () => {
     const turn = createTurn({
       session: {
