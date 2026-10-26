@@ -10,6 +10,33 @@ function countOccurrences(text: string | undefined, needle: string): number {
 }
 
 describe("buildReplyPromptEnvelope", () => {
+  it("keeps exec notification guidance in current-turn context without rewriting event history", () => {
+    const sessionCtx = finalizeInboundContext({
+      Body: "Exec completed (fixture, code 0) :: result",
+      Provider: "mattermost",
+      InternalTurnSource: "event",
+      InputProvenance: { kind: "internal_system", sourceTool: "exec" },
+    });
+    const envelope = buildReplyPromptEnvelope({
+      ctx: sessionCtx,
+      sessionCtx,
+      baseBody: sessionCtx.Body!,
+      hasUserBody: true,
+      inboundUserContext: "",
+      isBareSessionReset: false,
+      startupAction: "new",
+      sourceReplyDeliveryMode: "message_tool_only",
+    });
+    expect(envelope.currentInboundContext?.text).toContain(
+      "Assistant text, including progress and final answers, stays private",
+    );
+    expect(envelope.currentInboundContext?.text).toContain(
+      "available message or source-reply tool",
+    );
+    expect(envelope.transcriptCommandBody).toBe(sessionCtx.Body);
+    expect(envelope.prefixedCommandBody).toBe(sessionCtx.Body);
+  });
+
   it("keeps bare reset runtime context in the model prompt and out of transcript/current-turn context", () => {
     const sessionCtx = finalizeInboundContext({
       Body: "",

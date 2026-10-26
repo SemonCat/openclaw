@@ -406,6 +406,12 @@ OpenClaw builds the candidate list from the currently requested `provider/model`
 
 A final provider refusal ends the current turn. OpenClaw surfaces it without automatic recovery turns, compaction retries, or switching to an unrelated model. Except for a misalignment precaution, a queued or later user message still starts its own turn.
 
+When an OpenAI-compatible response ends with `content_filter`, OpenClaw names the
+provider's content filter in the user-visible error. If tools may already have
+executed, the error also reminds the user to verify their results before retrying.
+The same explanation appears in Control UI history without exposing raw provider
+details.
+
 ### Misalignment precautions
 
 An OpenAI `misalignment_policy_violation` stops further work in the affected

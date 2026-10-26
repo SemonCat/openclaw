@@ -642,6 +642,8 @@ export async function prepareAndDispatchEmbeddedRunAttempt(
     forceCodeModeTools: params.forceCodeModeTools,
     codeModeOverride: params.codeModeOverride,
     disableToolSearch: params.disableToolSearch,
+    canRecoverExecCompletionDelivery: params.canRecoverExecCompletionDelivery,
+    execCompletionDeliveryRecovery: params.execCompletionDeliveryRecovery,
     sessionReadScopeKey: params.sessionReadScopeKey,
     forceMessageTool: params.forceMessageTool,
     enableHeartbeatTool: params.enableHeartbeatTool,

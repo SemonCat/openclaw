@@ -8,7 +8,7 @@ import { MESSAGE_TOOL_ONLY_DELIVERY_HINT } from "../../plugin-sdk/message-tool-d
 import { annotateInterSessionPromptText } from "../../sessions/input-provenance.js";
 import { MEDIA_ONLY_USER_TEXT } from "../../sessions/user-turn-media.js";
 import type { SourceReplyDeliveryMode } from "../get-reply-options.types.js";
-import { resolveInternalTurnTranscript } from "../internal-turn-source.js";
+import { isExecCompletionTurn, resolveInternalTurnTranscript } from "../internal-turn-source.js";
 import { buildInboundMediaNoteProjection } from "../media-note.js";
 import type { MsgContext, TemplateContext } from "../templating.js";
 import { appendChannelPromptContext } from "./channel-prompt-context.js";
@@ -99,9 +99,13 @@ function resolveRoomEventTranscriptBody(params: ReplyPromptEnvelopeBaseParams): 
 }
 
 function resolvePerTurnDeliveryDirective(params: {
+  ctx: MsgContext;
   inboundEventKind?: InboundEventKind;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
 }): string | undefined {
+  if (isExecCompletionTurn(params.ctx) && params.sourceReplyDeliveryMode === "message_tool_only") {
+    return "This is an internal exec completion. Continue processing outstanding work. Assistant text, including progress and final answers, stays private. Only send a useful new result or actionable failure to the original conversation through an available message or source-reply tool; routine or stale acknowledgments need no notification.";
+  }
   if (params.inboundEventKind === "room_event") {
     return params.sourceReplyDeliveryMode === "message_tool_only"
       ? `${ROOM_EVENT_PARTICIPATION_RULE} To respond visibly, use message(action=send); your final text here stays private either way.`

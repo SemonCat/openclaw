@@ -71,6 +71,26 @@ describe("resolveStrandedReplyRecovery", () => {
   const substantiveFinal =
     "This reply is substantive enough to look user-facing. It contains a second sentence so the private-final policy treats it as stranded output.";
 
+  it.each(["exec", "exec-event"])(
+    "never forces private %s prose through the interactive reply retry",
+    (sourceTool) => {
+      const base = createMockFollowupRun({ prompt: "completion" });
+      base.run.inputProvenance = { kind: "internal_system", sourceTool };
+      expect(
+        resolveStrandedReplyRecovery({
+          base,
+          payloads: [{ text: substantiveFinal }],
+          finalText: substantiveFinal,
+          sourceReplyDeliveryMode: "message_tool_only",
+          sendPolicyDenied: false,
+          successfulSourceReplyDelivery: false,
+          isHeartbeat: false,
+          isRoomEvent: false,
+        }),
+      ).toEqual({ kind: "none" });
+    },
+  );
+
   it.each([
     { payload: { text: "The recovered answer is ready." }, expected: "none" },
     {

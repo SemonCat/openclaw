@@ -5,6 +5,7 @@ import {
   recordMcpLoopbackToolCallResult,
   updateMcpLoopbackToolCallCapture,
 } from "../../gateway/mcp-http.loopback-runtime.js";
+import type { InputProvenance } from "../../sessions/input-provenance.js";
 import { buildPreparedCliRunContext } from "../cli-runner.test-helpers.js";
 import { createCliToolTracking } from "./execute-tool-tracking.js";
 
@@ -47,6 +48,72 @@ function startQuestion(tracking: Tracking, toolCallId: string, timeoutSeconds?: 
   updateMcpLoopbackToolCallCapture(capture, { toolName: "ask_user", args });
   return capture;
 }
+
+describe("CLI unresolved source reply routing", () => {
+  it.each<{
+    name: string;
+    provenance?: InputProvenance;
+    external: boolean;
+  }>([
+    {
+      name: "cross-session coordination",
+      provenance: {
+        kind: "inter_session",
+        sourceTool: "sessions_send",
+        sourceSessionKey: "agent:main:mattermost:channel:coordination:thread:request",
+      },
+      external: false,
+    },
+    { name: "ambient dashboard recovery", external: true },
+    {
+      name: "same-session follow-up",
+      provenance: {
+        kind: "inter_session",
+        sourceTool: "sessions_send",
+        sourceSessionKey: "mattermost:channel:coordination",
+      },
+      external: true,
+    },
+    {
+      name: "subagent completion",
+      provenance: {
+        kind: "inter_session",
+        sourceTool: "subagent_announce",
+        sourceSessionKey: "agent:main:subagent:worker",
+      },
+      external: true,
+    },
+  ])("classifies $name before recording uncertain delivery", async ({ provenance, external }) => {
+    const context = buildPreparedCliRunContext({
+      sessionKey: "agent:main:mattermost:channel:coordination",
+    });
+    context.params.config = {};
+    context.params.messageChannel = "webchat";
+    context.params.sourceReplyDeliveryMode = "message_tool_only";
+    context.params.inputProvenance = provenance;
+    const tracking = createCliToolTracking(context);
+    const recordRunError = vi.fn();
+    tracking.handleCliToolUseStart({
+      toolCallId: "pending-reply",
+      name: "mcp__openclaw__message",
+      kind: "mcp_tool_use",
+      args: { action: "send", message: "Pending reply." },
+    });
+
+    await tracking.finishDeliveryTracking({ useManagedClaudeLiveSession: false, recordRunError });
+
+    expect(tracking.withExecutionEvidence({ text: "" }).didSendViaMessagingTool).toBe(
+      external ? true : undefined,
+    );
+    expect(recordRunError).toHaveBeenCalledWith(
+      new Error(
+        external
+          ? "CLI JSONL message tool call remained unresolved after exit"
+          : "CLI JSONL source reply call remained unresolved after exit",
+      ),
+    );
+  });
+});
 
 describe("CLI loopback ask_user deadline tracking", () => {
   beforeEach(() => {

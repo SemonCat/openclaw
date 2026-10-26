@@ -291,6 +291,8 @@ A waited send that finishes without visible assistant text returns `status: "no_
 
 Thread-scoped chat sessions, such as keys ending in `:thread:<id>`, are not valid `sessions_send` targets. Use the parent channel session key for inter-agent coordination so tool-routed messages do not appear inside an active human-facing thread.
 
+When `sessions_send` targets a different session, an implicit `message` send in that internal run records a private transcript reply for the requester flow. The parent session's channel key does not make that send a public channel post. To send proactively to an external conversation, specify the destination explicitly. Same-session fire-and-forget follow-ups and subagent completion replies keep their normal source routing.
+
 Messages and delayed replies are marked as inter-session data in the receiving prompt (`[Inter-session message ... isUser=false]`) and in transcript provenance. The receiving agent should treat them as tool-routed data, not as a direct end-user-authored instruction.
 
 Agent shell commands must not substitute operator CLI message RPCs for this

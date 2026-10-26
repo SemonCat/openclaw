@@ -60,6 +60,14 @@ export function addSourceReplyFinalControl(schema: TObject): TObject {
   return Type.Object({ ...schema.properties, final: SOURCE_REPLY_FINAL_PROPERTY });
 }
 
+export function consumeSourceReplyFinalControl(
+  params: Record<string, unknown>,
+): boolean | undefined {
+  const sourceReplyFinal = typeof params.final === "boolean" ? params.final : undefined;
+  delete params.final;
+  return sourceReplyFinal;
+}
+
 export function enforceSourceReplyOnlyTextDirectives(args: Record<string, unknown>): void {
   if (typeof args.message !== "string" || !args.message.trim()) {
     throw sourceReplyPolicyError("Completion source replies require non-empty visible text.");

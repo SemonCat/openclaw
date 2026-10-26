@@ -16,7 +16,7 @@ import {
 } from "../../utils/message-channel.js";
 import type { ReplyPayload } from "../types.js";
 import { createAgentLifecycleTerminalBackstop } from "./agent-lifecycle-terminal.js";
-import { resolveTerminalReplyDelivery } from "./agent-runner-core.js";
+import { resolveSourceReplyPolicy, resolveTerminalReplyDelivery } from "./agent-runner-core.js";
 import {
   createAgentRunEventHandler,
   type MessageToolDeliveryState,
@@ -121,6 +121,15 @@ export async function runEmbeddedFallbackCandidate(
     const result = await params.timing.measure("embedded_run", () => {
       const embeddedRunParams: RunEmbeddedAgentInternalParams = {
         ...runBaseParams,
+        canRecoverExecCompletionDelivery: () =>
+          !resolveSourceReplyPolicy({
+            cfg: params.runtimeConfig,
+            sessionCtx: turn.sessionCtx,
+            sessionEntry: turn.getActiveSessionEntry(),
+            sessionKey: turn.sessionKey ?? turn.followupRun.run.sessionKey ?? "",
+            runtimePolicySessionKey: turn.runtimePolicySessionKey,
+            opts: turn.opts,
+          }).sendPolicyDenied,
         lifecycleGeneration: params.getLifecycleGeneration(),
         allowGatewaySubagentBinding: true,
         cronCreatorAuthorityCapability: turn.opts?.cronCreatorAuthorityCapability,

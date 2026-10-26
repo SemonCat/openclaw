@@ -26,6 +26,7 @@ import { stripTargetProviderPrefix } from "../../infra/outbound/channel-target-p
 import { actionHasTarget } from "../../infra/outbound/message-action-spec.js";
 import { resolveAllowedMessageActions } from "../../infra/outbound/outbound-policy.js";
 import { normalizeAccountId, parseSessionDeliveryRoute } from "../../routing/session-key.js";
+import { isCrossSessionSend, type InputProvenance } from "../../sessions/input-provenance.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import { listAllChannelSupportedActions, listChannelSupportedActions } from "../channel-tools.js";
 import { buildMessageToolSchemaFromActions } from "./message-tool-schema.js";
@@ -55,6 +56,7 @@ type MessageActionDiscoveryInput = Omit<ChannelMessageActionDiscoveryInput, "cfg
 
 type MessageToolCurrentContextOptions = {
   agentSessionKey?: string;
+  inputProvenance?: InputProvenance;
   sessionId?: string;
   currentChannelId?: string;
   currentChannelProvider?: string;
@@ -187,7 +189,11 @@ export function resolveEffectiveCurrentChannelContext(
   const currentChannelProvider = options?.currentChannelProvider;
   const currentChannelId = options?.currentChannelId;
   const sessionDelivery =
-    normalizeMessageChannel(currentChannelProvider) === INTERNAL_MESSAGE_CHANNEL
+    normalizeMessageChannel(currentChannelProvider) === INTERNAL_MESSAGE_CHANNEL &&
+    !isCrossSessionSend({
+      sessionKey: options?.agentSessionKey,
+      inputProvenance: options?.inputProvenance,
+    })
       ? inferDeliveryFromSessionKey(options?.agentSessionKey, request, options?.sessionId)
       : null;
 

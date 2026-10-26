@@ -12,6 +12,7 @@ export type EmbeddedRunTerminalRetryState = {
   missingAssistantAttempts: number;
   compactionContinuationAttempts: number;
   beforeFinalizeRevisionAttempts: number;
+  execCompletionDeliveryAttempts: number;
 };
 
 export function createEmbeddedRunTerminalRetryState(): EmbeddedRunTerminalRetryState {
@@ -22,5 +23,6 @@ export function createEmbeddedRunTerminalRetryState(): EmbeddedRunTerminalRetryS
     missingAssistantAttempts: 0,
     compactionContinuationAttempts: 0,
     beforeFinalizeRevisionAttempts: 0,
+    execCompletionDeliveryAttempts: 0,
   };
 }

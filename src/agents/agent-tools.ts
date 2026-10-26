@@ -91,6 +91,9 @@ export { resolveToolLoopDetectionConfig } from "./tool-loop-detection-config.js"
 type InternalCodingToolsOptions = OpenClawCodingToolsOptions & {
   /** The host owns continuation policy when this factory builds only part of its tool surface. */
   sessionEventSourcePolicy?: SessionEventSourcePolicy;
+  /** Host recovery can narrow an existing delivery tool to the captured source. */
+  sourceReplyOnly?: true;
+  sourceReplyDeliveryAllowed?: () => boolean;
 };
 
 // Both SDK paths assemble the same options; only compatibility resolves delegate policy synchronously.
@@ -148,8 +151,9 @@ function* assembleOpenClawCodingTools(
   // The verified requester profile owns completion authority; its delivery grant
   // stays source-bound even when parent tools remain available to the turn.
   const sourceReplyOnly =
-    capabilityProfile.policy.requesterPolicySource === "completion-handoff" &&
-    options?.sourceReplyDeliveryMode === "message_tool_only";
+    options?.sourceReplyOnly === true ||
+    (capabilityProfile.policy.requesterPolicySource === "completion-handoff" &&
+      options?.sourceReplyDeliveryMode === "message_tool_only");
   const localModelLeanPreserveToolNames = resolveLocalModelLeanPreserveToolNames({
     toolNames: capabilityProfile.policy.explicitToolOverrideAllowlist,
     forceMessageTool: options?.forceMessageTool,
@@ -619,6 +623,7 @@ function* assembleOpenClawCodingTools(
       sessionKey: executionSessionKey,
       accountId: gatewayCaller.accountId,
       capabilityProfile,
+      sourceReplyDeliveryAllowed: options?.sourceReplyDeliveryAllowed,
       sessionEventSourcePolicy: options?.sessionEventSourcePolicy ?? {
         toolsAllow: finalizedTools.map((tool) => tool.name),
       },
