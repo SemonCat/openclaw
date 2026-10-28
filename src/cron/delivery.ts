@@ -41,6 +41,15 @@ type CronAnnounceTarget = {
   inheritSessionThread?: boolean;
 };
 
+function appendCronInspectFooter(text: string, inspectUrl: string, channel: string): string {
+  // Angle-bracket destinations keep parentheses literal; anything that could
+  // close the destination or break the line falls back to the bare URL.
+  if (channel === "mattermost" && !/[<>\s]/.test(inspectUrl)) {
+    return `${text}\n\n[查看執行紀錄](<${inspectUrl}>)`;
+  }
+  return `${text}\nInspect: ${inspectUrl}`;
+}
+
 type SuccessfulDeliveryTarget = Extract<DeliveryTargetResolution, { ok: true }>;
 type CronAnnounceDeliveryOutcome = Extract<
   Awaited<ReturnType<typeof sendDurableMessageBatchCore>>,
@@ -115,11 +124,23 @@ export async function sendCronAnnouncePayloadStrict(params: {
     deliveryAttemptFence: CronCompletionDeliveryFence | null;
   };
   onDeliveryAttempt?: (reachedRecipient: boolean) => void;
+  /** Control UI run link, appended after target resolution so it can match the channel. */
+  inspectUrl?: string;
 }): Promise<CronAnnounceDeliveryOutcome> {
   const delivery = await resolveCronAnnounceDelivery(params);
   if (!delivery.ok) {
     throw delivery.error;
   }
+  const announcePayload = params.inspectUrl
+    ? {
+        ...params.payload,
+        text: appendCronInspectFooter(
+          params.payload.text ?? "",
+          params.inspectUrl,
+          delivery.resolvedTarget.channel,
+        ),
+      }
+    : params.payload;
   const runSessionKey = resolveCronNotificationSessionKey({
     jobId: params.jobId,
     sessionKey: params.target.sessionKey,
@@ -155,7 +176,7 @@ export async function sendCronAnnouncePayloadStrict(params: {
     to: delivery.resolvedTarget.to,
     accountId: delivery.resolvedTarget.accountId,
     threadId: delivery.resolvedTarget.threadId,
-    payloads: [params.payload],
+    payloads: [announcePayload],
     session: delivery.session,
     identity: delivery.identity,
     bestEffort: false,

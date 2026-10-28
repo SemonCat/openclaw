@@ -29,6 +29,8 @@ import {
 import type { AnyAgentTool } from "./common.js";
 import {
   captureGatewayToolCallerAssertion,
+  captureGatewayToolReceiptAssertion,
+  composeReceiptAuthority,
   getGatewayToolCallerIdentity,
   withGatewayPersonalToolUser,
   withGatewayToolApprovalOwner,
@@ -37,6 +39,53 @@ import {
 } from "./gateway-caller-context.js";
 
 describe("gateway caller context wrapper", () => {
+  it("preserves prepared source authority while tightening receipt policy", async () => {
+    let sourceActive = true;
+    let deliveryAllowed = true;
+    const assertSource = () => {
+      if (!sourceActive) {
+        throw new Error("source revoked");
+      }
+    };
+    const release = vi.fn();
+    const prepare = vi.fn(async () => ({
+      nativeSource: true,
+      opaqueCommitGuard: true,
+      assertCurrent: assertSource,
+      checks: [],
+      release,
+    }));
+    const original = Object.assign(() => sourceActive, {
+      nativeSource: true,
+      opaqueCommitGuard: true,
+      prepareSessionSource: prepare,
+    });
+    const authority = expectDefined(
+      composeReceiptAuthority(original, () => deliveryAllowed),
+      "composed receipt authority",
+    );
+    const prepared = await prepareSessionSourceAuthority(
+      captureGatewayToolReceiptAssertion(authority),
+    );
+    try {
+      expect(prepared.nativeSource).toBe(true);
+      expect(prepared.opaqueCommitGuard).toBe(true);
+      expect(prepare).toHaveBeenCalledTimes(1);
+      expect(authority()).toBe(true);
+      prepared.assertCurrent();
+      deliveryAllowed = false;
+      expect(authority()).toBe(false);
+      expect(() => prepared.assertCurrent()).toThrow("authority is no longer active");
+      deliveryAllowed = true;
+      sourceActive = false;
+      expect(authority()).toBe(false);
+      expect(() => prepared.assertCurrent()).toThrow("source revoked");
+    } finally {
+      await prepared.release?.();
+    }
+    expect(release).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps prepared caller authority live through personal selection without synchronous source reads", async () => {
     const refusal = new Error("requesting session authority was revoked");
     let active = true;

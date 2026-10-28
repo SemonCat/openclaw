@@ -1,11 +1,15 @@
 import path from "node:path";
 import { asFiniteNumber } from "@openclaw/normalization-core/number-coercion";
 import type { InternalSessionEntry as SessionEntry } from "../../config/sessions.js";
+import { isMainRestartRecoveryCandidate } from "../../config/sessions/restart-recovery-state.js";
 import { resolveUnsuffixedSqliteTargetFromSessionStorePath } from "../../config/sessions/session-sqlite-target-paths.js";
 import { resolveSqliteTargetFromSessionStorePath } from "../../config/sessions/session-sqlite-target.js";
 import { isPerAgentSessionStoreConfig } from "../../config/sessions/session-store-config.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
+import { readSessionTranscriptSummaryAsync } from "../../gateway/session-transcript-readers.js";
 import { resolveGatewaySessionStoreTarget } from "../../gateway/session-utils-store-lookup.js";
+import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
+import { hasLiveAgentRunContext } from "../../infra/agent-run-registry.js";
 import {
   LEGACY_IMPLICIT_AGENT_ID,
   classifySessionKeyShape,
@@ -101,4 +105,101 @@ export function captureYieldedMainSessionContinuation(
     !owner.requesterTurnRunId &&
     owner.requesterSettleWake === wake &&
     wake?.rearmGeneration === rearmGeneration;
+}
+
+/** Reconcile older builds' yielded execution fence after its requester debt has settled. */
+export async function prepareCompletedYieldedMainSessionReconciliation(params: {
+  agentId?: string;
+  sessionKey: string;
+  storePath: string;
+  entry: SessionEntry;
+}): Promise<
+  { isCurrent: () => boolean; fences: NonNullable<SessionEntry["restartRecoveryRuns"]> } | undefined
+> {
+  const { entry } = params;
+  const lifecycleGeneration = getAgentEventLifecycleGeneration();
+  if (
+    !isMainRestartRecoveryCandidate(entry, params.sessionKey) ||
+    entry.status !== "done" ||
+    entry.abortedLastRun === true ||
+    entry.lifecycleRunId !== undefined ||
+    entry.mainRestartRecovery !== undefined ||
+    entry.pendingFinalDelivery !== undefined ||
+    entry.restartRecoveryDeliveryRunId !== undefined ||
+    entry.restartRecoveryHarnessCompletion !== undefined ||
+    !entry.lastRunId ||
+    entry.activeWriterRunId !== entry.lastRunId
+  ) {
+    return undefined;
+  }
+  const requester = resolveRestartRecoveryDispatchTarget({
+    ...params,
+    storeAgentId: params.agentId,
+  });
+  if (!entry.restartRecoveryRuns?.length || !requester) {
+    return undefined;
+  }
+  const listRuns = () =>
+    listSubagentRunsForRequester(requester.sessionKey, {
+      requesterAgentId: requester.agentId,
+    }).filter((run) => !run.collect && run.expectsCompletionMessage === true);
+  const children = listRuns();
+  // Legacy yield receipts lack an epoch. Only an unreplaced launch cohort in
+  // the fence's exact epoch can corroborate it; a receipt before that cohort
+  // started cannot retire a later same-ID execution.
+  const childLifecycleGeneration = children[0]?.execution.lifecycleGeneration;
+  const notBefore = Math.max(
+    ...children.map((run) => asFiniteNumber(run.execution.startedAt) ?? Number.POSITIVE_INFINITY),
+  );
+  const fences = entry.restartRecoveryRuns.filter(
+    (run) =>
+      run.runId !== entry.lastRunId &&
+      run.lifecycleGeneration === childLifecycleGeneration &&
+      run.lifecycleGeneration !== lifecycleGeneration &&
+      !hasLiveAgentRunContext(run.runId),
+  );
+  if (!fences.length || !Number.isFinite(notBefore)) {
+    return undefined;
+  }
+  const isCurrent = () => {
+    const current = listRuns();
+    return (
+      getAgentEventLifecycleGeneration() === lifecycleGeneration &&
+      fences.every((fence) => !hasLiveAgentRunContext(fence.runId)) &&
+      children.length > 0 &&
+      current.length === children.length &&
+      children.every(
+        (run) =>
+          current.includes(run) &&
+          run.generation === 1 &&
+          run.execution.lifecycleGeneration === childLifecycleGeneration &&
+          typeof run.execution.startedAt === "number" &&
+          Number.isFinite(run.execution.startedAt) &&
+          run.execution.startedAt <= notBefore &&
+          run.execution.status === "terminal" &&
+          run.execution.endedAt !== undefined &&
+          run.cleanupCompletedAt !== undefined &&
+          run.delivery?.status === "delivered" &&
+          !run.requesterTurnRunId &&
+          !run.requesterSettleWake,
+      )
+    );
+  };
+  if (!isCurrent()) {
+    return undefined;
+  }
+  const summary = await readSessionTranscriptSummaryAsync(
+    {
+      agentId: params.agentId,
+      storePath: params.storePath,
+      sessionKey: params.sessionKey,
+      sessionId: entry.sessionId,
+    },
+    { kind: "yielded-recovery-runs", runIds: fences.map((fence) => fence.runId), notBefore },
+  );
+  if (summary.kind !== "yielded-recovery-runs") {
+    return undefined;
+  }
+  const proven = fences.filter((fence) => summary.yieldedRunIds.includes(fence.runId));
+  return proven.length && isCurrent() ? { isCurrent, fences: proven } : undefined;
 }

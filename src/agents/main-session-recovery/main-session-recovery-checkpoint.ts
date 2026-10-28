@@ -1,3 +1,4 @@
+import { safeParseJsonRecord } from "@openclaw/normalization-core/json-coercion";
 import { asOptionalRecord } from "@openclaw/normalization-core/record-coerce";
 import {
   isCompletionReportInputProvenance,
@@ -13,6 +14,46 @@ type RecoverySource =
   | "inter_session"
   | "internal_system"
   | "external_user";
+
+/** Only a host-stamped successful tool result proves that this execution yielded. */
+export function selectMainSessionYieldedRuns(
+  visit: (read: (message: unknown) => void) => void,
+  runIds: readonly string[],
+  notBefore: number,
+): string[] {
+  const candidates = new Set(runIds);
+  const yielded = new Set<string>();
+  visit((message) => {
+    const record = asOptionalRecord(message);
+    const runId = asOptionalRecord(record?.["__openclaw"])?.runId;
+    if (
+      getTranscriptMessageRole(message) !== "toolResult" ||
+      record?.toolName !== "sessions_yield" ||
+      record.isError === true ||
+      typeof runId !== "string" ||
+      !candidates.has(runId) ||
+      typeof record.timestamp !== "number" ||
+      !Number.isFinite(record.timestamp) ||
+      record.timestamp < notBefore ||
+      !Array.isArray(record.content)
+    ) {
+      return;
+    }
+    if (
+      record.content.some((part) => {
+        const block = asOptionalRecord(part);
+        return (
+          block?.type === "text" &&
+          typeof block.text === "string" &&
+          safeParseJsonRecord(block.text)?.status === "yielded"
+        );
+      })
+    ) {
+      yielded.add(runId);
+    }
+  });
+  return [...yielded];
+}
 
 export function selectMainSessionRecoveryCheckpoint(
   visit: (read: (message: unknown) => void) => void,

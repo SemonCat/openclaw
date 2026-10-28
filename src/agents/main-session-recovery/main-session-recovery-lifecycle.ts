@@ -175,10 +175,24 @@ export function projectMainSessionRecoveryLifecycle(params: {
     });
   }
   const patch = { ...params.snapshotPatch };
-  if (interrupted || isAgentLifecycleYieldedWaiting(params.event.data ?? {})) {
+  if (interrupted) {
     return lifecycleGeneration && lifecycleGeneration !== params.currentLifecycleGeneration
       ? { action: "suppress" }
       : apply(patch);
+  }
+  if (isAgentLifecycleYieldedWaiting(params.event.data ?? {})) {
+    if (lifecycleGeneration && lifecycleGeneration !== params.currentLifecycleGeneration) {
+      return { action: "suppress" };
+    }
+    if (matchesFence && !params.entry?.mainRestartRecovery && !params.entry?.abortedLastRun) {
+      // Yield ends this execution after requester custody transfers. Child wakes
+      // and pending final delivery retain their own durable obligations.
+      const remaining = params.entry?.restartRecoveryRuns?.filter(
+        (run) => run.runId !== runId || run.lifecycleGeneration !== lifecycleGeneration,
+      );
+      patch.restartRecoveryRuns = remaining?.length ? remaining : undefined;
+    }
+    return apply(patch);
   }
   const runs = params.entry?.restartRecoveryRuns;
   // The current owner retires stale generations of its own run id. An older

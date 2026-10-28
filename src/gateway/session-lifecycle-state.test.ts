@@ -603,7 +603,7 @@ describe("session lifecycle state", () => {
     expect(restarted.lastRunError).toBeUndefined();
   });
 
-  it("retains yielded continuation custody without recording a terminal outcome", async () => {
+  it("retires yielded execution custody without recording a terminal outcome", async () => {
     const lifecycleGeneration = getAgentEventLifecycleGeneration();
     const restartRecoveryRuns = [{ runId: "yielded-recovery-run", lifecycleGeneration }];
     loggerMocks.info.mockClear();
@@ -637,8 +637,8 @@ describe("session lifecycle state", () => {
       runtimeMs: 750,
       abortedLastRun: false,
       lifecycleRunId: "yielded-recovery-run",
-      restartRecoveryRuns,
     });
+    expect(yielded.restartRecoveryRuns).toBeUndefined();
     expect(yielded.status).toBeUndefined();
     expect(loggerMocks.info).not.toHaveBeenCalled();
     expect(loggerMocks.warn).not.toHaveBeenCalled();

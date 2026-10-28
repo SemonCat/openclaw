@@ -21,12 +21,15 @@ import {
   buildEmbeddedRunnerAssistant,
   makeEmbeddedRunnerAttempt,
 } from "../agents/test-helpers/embedded-agent-runner-e2e-fixtures.js";
+import { jsonResult } from "../agents/tools/common.js";
 import {
   createAdmittedGatewayToolCallerIdentity,
   withGatewayToolCallerIdentity,
 } from "../agents/tools/gateway-caller-context.js";
+import { createMessageTool } from "../agents/tools/message-tool-execution.js";
 import * as routedReplies from "../auto-reply/reply/route-reply.js";
 import * as sessionEvents from "../auto-reply/reply/session-event-handoff.js";
+import type { ChannelMessageActionContext } from "../channels/plugins/types.public.js";
 import { setRuntimeConfigSnapshot } from "../config/runtime-snapshot.js";
 import { loadSessionEntry, replaceSessionEntry } from "../config/sessions/session-accessor.js";
 import type { OpenClawConfig } from "../config/types.openclaw.js";
@@ -39,6 +42,7 @@ import { openOpenClawStateDatabase } from "../state/openclaw-state-db.js";
 import { createTestRegistry } from "../test-utils/channel-plugins.js";
 import { withOpenClawTestState } from "../test-utils/openclaw-test-state.js";
 import { normalizeSessionDeliveryState } from "../utils/delivery-context.shared.js";
+import { getAgentRunContext } from "./agent-run-registry.js";
 import { runHeartbeatOnce } from "./heartbeat-runner-run.js";
 import { seedHeartbeatScratchForTest } from "./heartbeat-runner.test-utils.js";
 import { resolveSystemEventQueueKey } from "./system-event-ownership.js";
@@ -109,8 +113,29 @@ it.for(["none", "alerts-disabled", "visible"] as const)(
         });
         await seedHeartbeatScratchForTest({ content: "- Run the background status check\n" });
         const previousRegistry = captureActivePluginRegistrySnapshot();
+        const explicitPosts = vi.fn(async (_context: ChannelMessageActionContext) =>
+          jsonResult({ ok: true, messageId: "explicit-completion" }),
+        );
         const registry = createTestRegistry([
-          { pluginId: "telegram", plugin: heartbeatRunnerTelegramPlugin, source: "test" },
+          {
+            pluginId: "telegram",
+            plugin: {
+              ...heartbeatRunnerTelegramPlugin,
+              config: {
+                ...heartbeatRunnerTelegramPlugin.config,
+                listAccountIds: () => ["default"],
+              },
+              messaging: {
+                ...heartbeatRunnerTelegramPlugin.messaging,
+                targetResolver: { looksLikeId: () => true },
+              },
+              actions: {
+                describeMessageTool: () => ({ actions: ["send"] }),
+                handleAction: explicitPosts,
+              },
+            },
+            source: "test",
+          },
         ]);
         setActivePluginRegistry(registry);
         const runtimeRegistry = vi
@@ -176,6 +201,36 @@ it.for(["none", "alerts-disabled", "visible"] as const)(
           }
           expect(params.trigger).toBe("event");
           expect(params.prompt).toContain("PERIODIC_EXEC_COMPLETED");
+          expect(getAgentRunContext(params.runId)?.sessionEventDelivery).toBe(
+            visible ? undefined : false,
+          );
+          const identity = expectDefined(
+            createAdmittedGatewayToolCallerIdentity({
+              admittedRunContext,
+              agentId: params.agentId,
+              sessionKey: params.sessionKey,
+            }),
+            "completion notification caller",
+          );
+          const tool = createMessageTool({
+            config: params.config,
+            agentId: params.agentId,
+            agentSessionKey: params.sessionKey,
+            sessionId: params.sessionId,
+            runId: params.runId,
+            sourceReplyDeliveryMode: params.sourceReplyDeliveryMode,
+            inputProvenance: params.inputProvenance,
+            currentChannelProvider: params.messageProvider,
+            currentChannelId: params.currentChannelId,
+            currentMessagingTarget: params.currentMessagingTarget,
+            currentThreadTs: params.currentThreadTs,
+          });
+          await withGatewayToolCallerIdentity(identity, () =>
+            tool.execute("notify-completion", {
+              action: "send",
+              message: "Useful background result",
+            }),
+          );
           return { payloads: [{ text: "Background result is ready" }], meta: { durationMs: 1 } };
         });
         let completion: ReturnType<typeof sessionEvents.enqueueSessionEventForHost> | undefined;
@@ -195,16 +250,14 @@ it.for(["none", "alerts-disabled", "visible"] as const)(
           expect(outcome, JSON.stringify(outcome)).toMatchObject({
             status: "completed",
             executionStarted: true,
-            delivered: visible,
+            delivered: false,
           });
           expect(model).toHaveBeenCalledTimes(2);
           expect(sendHeartbeat).toHaveBeenCalledTimes(visible ? 1 : 0);
-          expect(sendCompletion).toHaveBeenCalledTimes(visible ? 1 : 0);
-          if (visible) {
-            expect(sendCompletion).toHaveBeenCalledWith(
-              expect.objectContaining({ channel: "telegram", to: destination }),
-            );
-          }
+          expect(sendCompletion).not.toHaveBeenCalled();
+          // Silent producers suppress automatic relay, not intentional message-tool actions.
+          expect(explicitPosts).toHaveBeenCalledTimes(1);
+          expect(explicitPosts.mock.calls[0]?.[0].params.to).toBe(destination);
         } finally {
           await waitForExecScope(scope.sessionKey);
           await Promise.allSettled([completion?.settled]);
@@ -520,45 +573,23 @@ it.for(completionRoutingCases)(
             await expect(second.accepted).resolves.toEqual({ ok: true });
             await expect(second.settled).resolves.toMatchObject({
               status: "completed",
-              delivered: true,
+              delivered: false,
             });
           }
           expect(model).toHaveBeenCalledTimes(testCase.reply === "chain" ? 2 : 1);
           const sent = send.mock.calls.map(([request]) => request.payload.text);
-          if (testCase.reply === "quiet" || testCase.groupMessageToolOnly) {
-            expect(sent).toEqual([]);
-            if (testCase.groupMessageToolOnly) {
-              expect(outcome.delivered).toBe(false);
-            }
-          } else if (testCase.reply === "failed") {
-            expect(send, JSON.stringify({ sent, outcome })).toHaveBeenCalledTimes(
-              testCase.actionableFailure ? 1 : 0,
-            );
-            if (testCase.actionableFailure) {
-              expect(send.mock.calls[0]?.[0].payload).toMatchObject({
-                isError: true,
-                text: expect.stringContaining("Sign in again"),
-              });
-              expect(sent[0]).toContain("openclaw configure");
-              expect(sent[0]).not.toContain(actionableFailureText);
-              expect(sent[0]).not.toContain("Synthetic terminal model failure");
-              expect(outcome.delivered).toBe(true);
-            }
-          } else if (testCase.reply === "tool-warning") {
-            expect(sent).toEqual([buildPayloads({ lastToolError: toolError })[0]?.text]);
-          } else if (testCase.reply === "chain") {
-            expect(sent).toEqual([
-              "First printed RESULT-7F3A; started the next one.",
-              "Second printed RESULT-2B4C.",
-            ]);
+          if (testCase.reply === "failed" && testCase.actionableFailure) {
+            expect(send.mock.calls[0]?.[0].payload).toMatchObject({
+              isError: true,
+              text: expect.stringContaining("Sign in again"),
+            });
+            expect(sent[0]).toContain("openclaw configure");
+            expect(sent[0]).not.toContain(actionableFailureText);
+            expect(sent[0]).not.toContain("Synthetic terminal model failure");
+            expect(outcome.delivered).toBe(true);
           } else {
-            expect(sent.filter((text) => text?.includes("RESULT-7F3A"))).toEqual([answer]);
-            if (testCase.reply === "status") {
-              expect(sent).toContain("🧩 Active Memory: status=policy-disabled");
-            }
-            if (testCase.reply === "truncated") {
-              expect(sent).toHaveLength(2);
-            }
+            expect(sent).toEqual([]);
+            expect(outcome.delivered).toBe(false);
           }
           for (const [request] of send.mock.calls) {
             expect(request).toMatchObject({

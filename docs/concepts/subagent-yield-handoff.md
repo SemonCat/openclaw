@@ -42,12 +42,25 @@ registry replacement operation; it does not create a second delegated task.
 Adoption clears a child-only pause notice instead of carrying it into completion.
 Actual requester completion batches keep their frozen membership and generation.
 
-Before admitting another turn in a yielded requester, the recovery owner transfers
-its ended execution's fence to the current durable child batch. The batch is
-revalidated before the write commits; absent or adopted batches, unrelated run
-fences, and outstanding recovery or delivery work remain fenced. The successor
-then receives its own execution fence, so completing it leaves later user input
-admissible without discarding pending child results.
+After requester custody transfers, an explicit yielded lifecycle end retires only
+that execution's exact run and generation fence. The registry keeps the child
+batch, continuation, and delivery obligations. Before the lifecycle end arrives,
+successor admission can transfer the ended execution's fence to the current
+durable child batch, revalidating the batch before commit. Unrelated fences and
+outstanding restart recovery remain fenced.
+
+Older installations can retain a yielded parent's fence after a different
+requester-settlement turn completes. Normal startup recovery or the next turn's
+admission reconciles this residue only with a host-stamped successful
+`sessions_yield` result for that exact predecessor, a completed successor row,
+and retained children whose execution, cleanup, and delivery have all settled.
+The children must retain their first execution in the fence's exact lifecycle
+generation, and the yield receipt must follow their launch. A legacy receipt
+without enough generation evidence cannot settle a replacement execution.
+Pending wakes, adopted children, pending final delivery, live executions, and
+current-generation fences prevent that reconciliation. Unproven sibling fences
+remain. This uses existing stored fields and requires no schema or configuration
+migration.
 
 An explicit `waitFor: "message"` counts as continuation evidence after the
 registry accepts the wait. The attempt carries that fact into terminal reply

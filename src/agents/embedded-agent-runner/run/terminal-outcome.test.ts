@@ -48,7 +48,7 @@ describe("embedded run attempt terminal outcome", () => {
       refusal: true,
       category: "cyber",
       expected:
-        "The provider refused this request (category: cyber). Revise the request and try again.",
+        "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
     },
     {
       name: "untrusted refusal category",
