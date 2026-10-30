@@ -323,6 +323,7 @@ export function createCliToolTracking(context: PreparedCliRunContext) {
         action: "send",
         sessionKey: context.params.sessionKey,
         sourceReplyDeliveryMode: context.params.sourceReplyDeliveryMode,
+        inputProvenance: context.params.inputProvenance,
         toolContext: {
           currentChannelProvider: context.params.messageChannel ?? context.params.messageProvider,
           currentChannelId: context.params.currentChannelId,

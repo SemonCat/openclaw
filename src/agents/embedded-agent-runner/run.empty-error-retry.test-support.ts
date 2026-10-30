@@ -467,7 +467,7 @@ describe("runEmbeddedAgent silent-error retry", () => {
       expect(mockedRunEmbeddedAttempt).toHaveBeenCalledTimes(1);
       expect(result.payloads?.[0]).toMatchObject({
         isError: true,
-        text: "The provider refused this request (category: cyber). Revise the request and try again.",
+        text: "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
       });
     });
   });

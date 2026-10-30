@@ -3,7 +3,10 @@ import { resolveGatewayMessageChannel } from "../utils/message-channel.js";
 import type { OpenClawCodingToolsOptions } from "./agent-tools.options.js";
 import type { ResolvedConversationCapabilityProfile } from "./conversation-capability-profile.js";
 import { isConversationToolAllowed } from "./conversation-tool-policy-pipeline.js";
-import { wrapToolWithGatewayCallerIdentity } from "./tools/gateway-caller-context.js";
+import {
+  composeReceiptAuthority,
+  wrapToolWithGatewayCallerIdentity,
+} from "./tools/gateway-caller-context.js";
 
 /** Carries the coding surface's prepared policy and requesting route into plugin delegation. */
 export function createCodingToolsGatewayCaller(params: {
@@ -13,6 +16,7 @@ export function createCodingToolsGatewayCaller(params: {
   accountId?: string;
   capabilityProfile: ResolvedConversationCapabilityProfile;
   sessionEventSourcePolicy?: SessionEventSourcePolicy;
+  sourceReplyDeliveryAllowed?: () => boolean;
 }) {
   const { options, agentId, sessionKey, capabilityProfile } = params;
   const settleBatch =
@@ -32,7 +36,9 @@ export function createCodingToolsGatewayCaller(params: {
             ? { sessionEventDelivery: false as const }
             : {}),
           // The existing source fence rechecks this after tool preparation and at final I/O.
-          receiptAuthority: settleBatch?.isCurrent,
+          receiptAuthority: params.sourceReplyDeliveryAllowed
+            ? composeReceiptAuthority(settleBatch?.isCurrent, params.sourceReplyDeliveryAllowed)
+            : settleBatch?.isCurrent,
           receiptAdmissions: settleBatch?.receiptAdmission
             ? [settleBatch.receiptAdmission]
             : undefined,

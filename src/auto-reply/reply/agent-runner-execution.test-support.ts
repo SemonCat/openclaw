@@ -399,6 +399,7 @@ export {
 } from "../../agents/test-helpers/model-fallback-runner.test-support.js";
 
 export type EmbeddedAgentParams = {
+  canRecoverExecCompletionDelivery?: RunEmbeddedAgentInternalParams["canRecoverExecCompletionDelivery"];
   runId: string;
   sessionId?: string;
   sessionKey?: string;

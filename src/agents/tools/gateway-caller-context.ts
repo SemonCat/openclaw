@@ -187,7 +187,7 @@ type AdmittedGatewayToolCallerParams = {
   turnSourceThreadId?: string | number;
 };
 
-function composeReceiptAuthority(
+export function composeReceiptAuthority(
   ...predicates: Array<ReceiptAuthority | undefined>
 ): ((() => boolean) & ReceiptAuthority) | undefined {
   const checks = predicates.filter(

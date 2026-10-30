@@ -61,7 +61,7 @@ describe("Gateway Codex failure recovery with automatic cyber failover off", () 
       firstTurnStartCount: 1,
       totalTurnStartCount: 2,
       visibleReplies: [
-        "The provider refused this request (category: cyber). Revise the request and try again.",
+        "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
         LATER_TURN_TEXT,
       ],
     },

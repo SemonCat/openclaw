@@ -10,6 +10,8 @@ import {
 } from "../../infra/agent-run-registry.js";
 import { resetCommandQueueStateForTest } from "../../process/command-queue.test-support.js";
 import { SystemAgentWizardAnswerError } from "../../system-agent/chat-engine.js";
+import { createAgentRuntimeApprovalAuthorityValidator } from "../agent-runtime-approval-authority.js";
+import { createAgentRuntimeIdentity } from "../agent-runtime-identity-token.js";
 import { systemAgentHandlers, type SystemAgentChatSession } from "./system-agent.js";
 import type { GatewayClient, GatewayRequestContext, RespondFn } from "./types.js";
 
@@ -201,6 +203,105 @@ afterEach(() => {
 });
 
 describe("openclaw.chat session ownership", () => {
+  it.each([true, false])(
+    "uses the verified wire caller with supplied delegation=%s and refuses a closed run",
+    async (supplied) => {
+      const sessions = new Map<string, SystemAgentChatSession>();
+      const context = makeContext(sessions);
+      context.validateAgentRuntimeApprovalAuthority =
+        createAgentRuntimeApprovalAuthorityValidator();
+      const operationalRunInstance = createOperationalRunInstanceRef("wire-owner-run");
+      const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+      const identity = await createAgentRuntimeIdentity({
+        agentId: "main",
+        sessionKey: "agent:main:wire-owner",
+        operationalRunInstance,
+        approvalAuthority: authority,
+        fullPermission: true,
+      });
+      const client = makeClient({ connId: "wire", deviceId: "wire-device" });
+      client.internal = { agentRuntimeIdentity: expectDefined(identity, "wire identity") };
+      const params = {
+        sessionId: "wire-owner",
+        message: "inspect configuration",
+        ...(supplied
+          ? { delegation: { agentId: "untrusted", sessionKey: "agent:untrusted:other" } }
+          : {}),
+      };
+      try {
+        expect((await callChat(context, params, client)).ok).toBe(true);
+        expect(createdEngineOptions[0]).toMatchObject({
+          requesterAgentId: "main",
+          operatorApprovalOnly: true,
+        });
+        const engine = expectDefined(createdEngines[0], "wire engine");
+        expect(engine.handle).toHaveBeenCalledWith("inspect configuration");
+        const proposal = { operation: { kind: "gateway-restart" }, hash: "a".repeat(64) };
+        engine.getPendingOperatorProposal.mockReturnValue(proposal);
+        engine.resolveOperatorApproval.mockImplementation((_decision, _hash, guard) => {
+          guard();
+          return { text: "Applied", action: "none", applied: true };
+        });
+        expect((await callChat(context, { ...params, message: "apply proposal" }, client)).ok).toBe(
+          true,
+        );
+        expect(engine.resolveOperatorApproval).toHaveBeenCalledWith(
+          "allow-once",
+          proposal.hash,
+          expect.any(Function),
+          undefined,
+        );
+      } finally {
+        releaseAgentRunDelegatedAuthority(authority);
+      }
+      const ownedSession = expectDefined(sessions.get(params.sessionId), "owned wire session");
+      ownedSession.lastUsedAt = 1;
+      for (const staleInput of [
+        params,
+        { sessionId: params.sessionId },
+        { sessionId: params.sessionId, reset: true },
+      ]) {
+        await expect(callChat(context, staleInput, client)).rejects.toThrow(
+          "authority is no longer active",
+        );
+        expect(sessions.get(params.sessionId)).toBe(ownedSession);
+        expect(ownedSession.lastUsedAt).toBe(1);
+      }
+      expect(transcriptStoreMocks.appendReset).not.toHaveBeenCalled();
+      expect(createdEngines[0]?.handle).toHaveBeenCalledTimes(2);
+    },
+  );
+
+  it("refuses a fresh wire welcome when authority closes during inference preparation", async () => {
+    const sessions = new Map<string, SystemAgentChatSession>();
+    const context = makeContext(sessions);
+    context.validateAgentRuntimeApprovalAuthority = createAgentRuntimeApprovalAuthorityValidator();
+    const operationalRunInstance = createOperationalRunInstanceRef("wire-welcome-run");
+    const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
+    const identity = await createAgentRuntimeIdentity({
+      agentId: "main",
+      sessionKey: "agent:main:wire-welcome",
+      operationalRunInstance,
+      approvalAuthority: authority,
+    });
+    const client = makeClient({ connId: "wire-welcome" });
+    client.internal = { agentRuntimeIdentity: expectDefined(identity, "wire welcome identity") };
+    inferenceFallbackMocks.verifySystemAgentInferenceWithFallback.mockImplementationOnce(
+      async () => {
+        releaseAgentRunDelegatedAuthority(authority);
+        return { ok: true, binding: {} };
+      },
+    );
+    try {
+      await expect(callChat(context, { sessionId: "wire-welcome" }, client)).rejects.toThrow(
+        "authority is no longer active",
+      );
+      expect(sessions.size).toBe(0);
+    } finally {
+      releaseAgentRunDelegatedAuthority(authority);
+    }
+  });
+
   it("binds a new non-delegated session and rejects another principal", async () => {
     const sessions = new Map<string, SystemAgentChatSession>();
     const context = makeContext(sessions);

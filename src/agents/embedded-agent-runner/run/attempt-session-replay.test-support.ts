@@ -10,12 +10,16 @@ import { rotateAgentEventLifecycleGeneration } from "../../../infra/agent-events
 import type { ImageContent } from "../../../llm/types.js";
 import { createNestedToolActivity } from "../../../sessions/nested-tool-activity.js";
 import { createUserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.js";
+import type { UserTurnTranscriptRecorder } from "../../../sessions/user-turn-transcript.types.js";
 import {
   closeOpenClawAgentDatabasesAsync,
   closeOpenClawAgentDatabasesForTest,
   openOpenClawAgentDatabase,
 } from "../../../state/openclaw-agent-db.js";
-import { withOpenClawTestState } from "../../../test-utils/openclaw-test-state.js";
+import {
+  type OpenClawTestState,
+  withOpenClawTestState,
+} from "../../../test-utils/openclaw-test-state.js";
 import { createAgentRunRestartAbortError } from "../../run-termination.js";
 import { guardSessionManager } from "../../session-tool-result-guard-wrapper.js";
 import {
@@ -235,85 +239,134 @@ export async function withInterruptedTurn(
       );
       await recorder.waitForRuntimePersistence();
     }
-    const attempt = {
-      config: {},
-      contextTokenBudget: 8000,
-      model: testModel,
-      modelId: testModel.id,
-      provider: testModel.provider,
-      runId,
-      sessionId: target.sessionId,
-      sessionKey: target.sessionKey,
-      sessionTarget: target,
-      sessionFile: target.sessionKey,
-      workspaceDir: state.workspaceDir,
-      prompt: "Finish this exact turn",
-      userTurnTranscriptRecorder: recorder,
-      timeoutMs: 120_000,
-    } as EmbeddedRunAttemptParams;
-    const lifecycle = createEmbeddedAttemptTranscriptLifecycle(attempt);
-    const selected = options.selectedOwner ? await loadSessionEntryForAdmission(target) : undefined;
-    const sessionReader =
-      selected && "kind" in selected.databaseClaim && selected.databaseClaim.kind === "worker"
-        ? selected.databaseClaim.reader
-        : undefined;
-    if (selected && !sessionReader) {
-      throw new Error("Replay fixture requires a selected worker reader");
-    }
-    let active = true;
-    const runAbortController = new AbortController();
-    const assertCurrent = () => {
-      runAbortController.signal.throwIfAborted();
-      if (!active) {
-        throw new Error("original writer closed");
-      }
-    };
-    const withOwnedTranscriptWrite = <T>(operation: () => Promise<T> | T) =>
-      withOwnedSessionTranscriptWrites(
-        {
-          sessionTarget: {
-            ...target,
-            expectedLifecycleRevision: "current-generation",
-            expectedWriterRunId: runId,
-          },
-          sessionReader,
-          assertCommitAllowed: () => {
-            assertCurrent();
-          },
-          withTranscriptWrite: (write) => lifecycle.withTranscriptWrite(write),
-        },
-        async () => await lifecycle.withTranscriptWrite(operation),
-      );
-    try {
-      await run({
-        attempt,
-        target,
-        revoke: () => {
-          active = false;
-        },
-        prepare: (onCreated, extra) =>
-          prepareEmbeddedAttemptSessionManager({
-            ...extra,
-            attempt,
-            assertCurrent: extra?.assertCurrent ?? assertCurrent,
-            agentDir: state.agentDir("main"),
-            effectiveCwd: state.workspaceDir,
-            effectiveWorkspace: state.workspaceDir,
-            onSessionManagerCreated: onCreated ?? (() => {}),
-            replayAllowedToolNames: new Set(["read"]),
-            resolveActiveContextEnginePluginId: () => undefined,
-            runAbortSignal: extra?.runAbortSignal ?? runAbortController.signal,
-            sessionAgentId: target.agentId,
-            withOwnedTranscriptWrite,
-          }),
-      });
-    } finally {
-      recorder.finishPendingInput!("interrupted");
-      await lifecycle.dispose();
-      await selected?.databaseClaim.release();
-      clearEmbeddedSessionPromptStates([target.sessionId]);
-    }
+    await runAdmittedAttempt(
+      { state, target, runId, recorder, selectedOwner: options.selectedOwner },
+      run,
+    );
   });
+}
+
+/** Channel ingress admits an unstaged user turn before its attempt prepares. */
+export async function withDirectlyAdmittedTurn(
+  inputText: string,
+  run: Parameters<typeof withInterruptedTurn>[1],
+  options: { selectedOwner?: boolean } = {},
+) {
+  await withOpenClawTestState({ label: "directly-admitted-turn" }, async (state) => {
+    const runId = "directly-admitted-turn";
+    const target = {
+      agentId: "main",
+      sessionId: runId,
+      sessionKey: `agent:main:${runId}`,
+      storePath: path.join(state.agentDir("main"), "openclaw-agent.sqlite"),
+    };
+    await upsertSessionEntryCore(target, {
+      sessionId: target.sessionId,
+      updatedAt: 1,
+      lifecycleRevision: "current-generation",
+      activeWriterRunId: runId,
+    });
+    const recorder = createUserTurnTranscriptRecorder({
+      target: { ...target, sessionEntry: undefined },
+      input: { text: inputText, timestamp: 1, idempotencyKey: `${runId}:user` },
+    });
+    await recorder.persistApproved();
+    await runAdmittedAttempt(
+      { state, target, runId, recorder, selectedOwner: options.selectedOwner },
+      run,
+    );
+  });
+}
+
+async function runAdmittedAttempt(
+  params: {
+    state: OpenClawTestState;
+    target: { agentId: string; sessionId: string; sessionKey: string; storePath: string };
+    runId: string;
+    recorder: UserTurnTranscriptRecorder;
+    selectedOwner?: boolean;
+  },
+  run: Parameters<typeof withInterruptedTurn>[1],
+) {
+  const { state, target, runId, recorder } = params;
+  const attempt = {
+    config: {},
+    contextTokenBudget: 8000,
+    model: testModel,
+    modelId: testModel.id,
+    provider: testModel.provider,
+    runId,
+    sessionId: target.sessionId,
+    sessionKey: target.sessionKey,
+    sessionTarget: target,
+    sessionFile: target.sessionKey,
+    workspaceDir: state.workspaceDir,
+    prompt: "Finish this exact turn",
+    userTurnTranscriptRecorder: recorder,
+    timeoutMs: 120_000,
+  } as EmbeddedRunAttemptParams;
+  const lifecycle = createEmbeddedAttemptTranscriptLifecycle(attempt);
+  const selected = params.selectedOwner ? await loadSessionEntryForAdmission(target) : undefined;
+  const sessionReader =
+    selected && "kind" in selected.databaseClaim && selected.databaseClaim.kind === "worker"
+      ? selected.databaseClaim.reader
+      : undefined;
+  if (selected && !sessionReader) {
+    throw new Error("Replay fixture requires a selected worker reader");
+  }
+  let active = true;
+  const runAbortController = new AbortController();
+  const assertCurrent = () => {
+    runAbortController.signal.throwIfAborted();
+    if (!active) {
+      throw new Error("original writer closed");
+    }
+  };
+  const withOwnedTranscriptWrite = <T>(operation: () => Promise<T> | T) =>
+    withOwnedSessionTranscriptWrites(
+      {
+        sessionTarget: {
+          ...target,
+          expectedLifecycleRevision: "current-generation",
+          expectedWriterRunId: runId,
+        },
+        sessionReader,
+        assertCommitAllowed: () => {
+          assertCurrent();
+        },
+        withTranscriptWrite: (write) => lifecycle.withTranscriptWrite(write),
+      },
+      async () => await lifecycle.withTranscriptWrite(operation),
+    );
+  try {
+    await run({
+      attempt,
+      target,
+      revoke: () => {
+        active = false;
+      },
+      prepare: (onCreated, extra) =>
+        prepareEmbeddedAttemptSessionManager({
+          ...extra,
+          attempt,
+          assertCurrent: extra?.assertCurrent ?? assertCurrent,
+          agentDir: state.agentDir("main"),
+          effectiveCwd: state.workspaceDir,
+          effectiveWorkspace: state.workspaceDir,
+          onSessionManagerCreated: onCreated ?? (() => {}),
+          replayAllowedToolNames: new Set(["read"]),
+          resolveActiveContextEnginePluginId: () => undefined,
+          runAbortSignal: extra?.runAbortSignal ?? runAbortController.signal,
+          sessionAgentId: target.agentId,
+          withOwnedTranscriptWrite,
+        }),
+    });
+  } finally {
+    recorder.finishPendingInput!("interrupted");
+    await lifecycle.dispose();
+    await selected?.databaseClaim.release();
+    clearEmbeddedSessionPromptStates([target.sessionId]);
+  }
 }
 
 export async function withReplaySession(

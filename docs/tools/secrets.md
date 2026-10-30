@@ -114,13 +114,13 @@ iOS, macOS, and Android render the same card with a masked secret field.
 Control UI, TUI, and native app cards arrive through the existing Gateway connection
 and do not require `gateway.publicOrigin` or a public link.
 
-Chat channels never accept the value. On Telegram, Discord, and similar
-surfaces the request is delivered as a link to the Control UI prompt — typing
-a credential into a chat message is exactly what this flow exists to avoid, so
-a plain-text reply is not captured as an answer. Links require an enabled Control
-UI and a configured `gateway.publicOrigin`. Without a usable link, delivery
-reports a visible blocker and cancels the pending request. Open a trusted Control
-UI or native app and retry, or ask the operator to configure the public origin.
+Chat messages never accept the value. A channel plugin may add a native masked
+credential form to the delivered prompt, backed by OpenClaw's store-bound
+question resolver; a plain-text reply is never captured as an answer. The prompt
+also links to the Control UI, which requires an enabled Control UI and a configured
+`gateway.publicOrigin`. Without that usable link, chat delivery reports a visible
+blocker and cancels the pending request. Open a trusted Control UI or native app
+and retry, or ask the operator to configure the public origin.
 
 Creating a credential request requires `operator.admin` plus the agent's trusted,
 live runtime authority. A run ID or an administrator connection alone is not

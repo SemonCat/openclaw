@@ -158,7 +158,7 @@ export const cronRunsHandler: GatewayRequestHandler = async (options) => {
             ? job
             : undefined;
         // Operator history survives deletion; scoped reads need a live matching owner.
-        if ((callerScope || p.agentId || visibility) && !matchedJob) {
+        if (((callerScope && !callerScope.manageAll) || p.agentId || visibility) && !matchedJob) {
           respondCronJobNotFound(respond, jobId);
           return undefined;
         }

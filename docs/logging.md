@@ -280,6 +280,12 @@ bounded, redacted error details for classification, including when a large
 partial response cannot fit in the transcript. Unrecognized errors still use
 generic chat copy; inspect the Gateway logs and stored error for diagnosis.
 
+Provider refusals carrying `cyber_policy` or a `cyber` refusal diagnostic that remain
+after [automatic cyber-policy escalation](/concepts/model-failover#automatic-cyber-policy-escalation)
+display the possible cybersecurity risk and error code in live replies and saved history.
+The message asks you to review the request and the provider's access requirements
+and check any actions that may have completed before the refusal.
+
 Responses output-identity conflicts record the event type, output position,
 expected and observed item types, and whether a tool call completed, without
 recording item IDs or response content. OpenClaw uses the existing bounded session

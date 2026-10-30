@@ -32,6 +32,7 @@ import {
   reportEmbeddedRunSuccessfulAuthBinding,
 } from "./auth-profile-success.js";
 import type { EmbeddedRunContextRecoveryState } from "./context-recovery-state.js";
+import { tryRecoverExecCompletionDelivery } from "./exec-completion-delivery.js";
 import type { EmbeddedRunFailoverRetryController } from "./failover-retry-controller.js";
 import { resolveFinalAssistantVisibleText } from "./helpers.js";
 import { countSettledTurnDeliveryPayloads } from "./incomplete-turn-classification.js";
@@ -250,6 +251,21 @@ export async function resolveEmbeddedRunTerminal(input: {
   // A failed isolated finalization is terminal for this user turn. Do not let
   // its settled side effects cascade into any ordinary retry family.
   const settledTurnFinalizationAttempted = input.settledTurnFinalizationOutcome !== "not-attempted";
+  if (
+    tryRecoverExecCompletionDelivery({
+      runParams,
+      attempt,
+      attemptAssistant: input.attemptAssistant,
+      prepared: input.prepared,
+      retryState,
+      sessionPromptState,
+      terminalInterrupted,
+      settledTurnFinalizationAttempted,
+    })
+  ) {
+    log.warn(`exec completion lacked a delivery decision: ${runLogContext} — retrying once`);
+    return { action: "retry" };
+  }
   const emptyAssistantReplyIsSilent = shouldTreatEmptyAssistantReplyAsSilent({
     // The host intentionally suppressed its cron placeholder, not a required model answer.
     terminalReplyExpectation:

@@ -12,6 +12,7 @@ import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/m
 import { resolveCommandTurnContext } from "../command-turn-context.js";
 import { isExplicitCommandTurnContext } from "../command-turn-detection.js";
 import type { SourceReplyDeliveryMode } from "../get-reply-options.types.js";
+import { isExecCompletionTurn } from "../internal-turn-source.js";
 import type { MsgContext } from "../templating.js";
 import type { FollowupRun } from "./queue/types.js";
 
@@ -30,6 +31,7 @@ export type SourceReplyDeliveryModeContext = Pick<
   | "BotUsername"
   | "WasMentioned"
   | "InputProvenance"
+  | "InternalTurnSource"
 >;
 
 export function isUnauthorizedTextSlashCommand(ctx: SourceReplyDeliveryModeContext): boolean {
@@ -61,6 +63,10 @@ export function resolveSourceReplyDeliveryMode(params: {
   messageToolAvailable?: boolean;
   defaultVisibleReplies?: "automatic" | "message_tool";
 }): SourceReplyDeliveryMode {
+  // Completion processing retains its explicit message route, never an automatic prose reply.
+  if (isExecCompletionTurn(params.ctx) && !isInternalSourceReplyChannel(params.ctx)) {
+    return "message_tool_only";
+  }
   if (params.strictMessageToolOnly === true) {
     return "message_tool_only";
   }
@@ -165,6 +171,7 @@ export function resolveSourceReplyVisibilityPolicy(params: {
 }) {
   const sourceReplyDeliveryMode = resolveSourceReplyDeliveryMode(params);
   const hasStableTurnOverride =
+    !isExecCompletionTurn(params.ctx) &&
     !isSyntheticSourceReplyTurn({
       inputProvenance: params.ctx.InputProvenance,
       isHeartbeat: params.isHeartbeat,

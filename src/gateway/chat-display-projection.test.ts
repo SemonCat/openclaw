@@ -525,6 +525,19 @@ it.each([
     diagnostics: [{ type: "provider_refusal", details: { category: "misalignment" } }],
     expected: "Chat stopped as a precaution. Review the findings in chat before continuing.",
   },
+  {
+    name: "saved cyber policy error",
+    errorCode: "cyber_policy",
+    errorType: "invalid_request",
+    expected:
+      "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
+  },
+  {
+    name: "current cyber refusal diagnostic",
+    diagnostics: [{ type: "provider_refusal", details: { category: "cyber" } }],
+    expected:
+      "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
+  },
 ])(
   "preserves $name guidance with empty and partial replies",
   ({ name: _name, expected, ...error }) => {

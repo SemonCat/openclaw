@@ -79,8 +79,6 @@ export async function finalizeCronCompletionAnnouncement(params: {
         ? undefined
         : createCronExecutionId(params.job.id, params.runStartedAtMs),
   });
-  // Command summaries are already redacted; adding the link earlier would strip its URL.
-  const text = inspectUrl ? `${params.text}\nInspect: ${inspectUrl}` : params.text;
   const abortSignal = params.abortSignal ?? new AbortController().signal;
   let deliveryMayHaveReachedRecipient = false;
   try {
@@ -102,7 +100,9 @@ export async function finalizeCronCompletionAnnouncement(params: {
             accountId: plan.accountId,
             sessionKey: resolveCronDeliverySessionKey(params.job),
           },
-          payload: { text },
+          payload: { text: params.text },
+          // Command summaries are already redacted; adding the link earlier would strip its URL.
+          inspectUrl,
           abortSignal,
           ...(params.runStartedAtMs === undefined
             ? {}

@@ -32,6 +32,8 @@ import {
   stripSessionsYieldArtifacts,
 } from "./attempt-sessions-yield.js";
 import { waitForEmbeddedAbortSettle } from "./attempt-subscription-cleanup.js";
+import { projectUndeliveredExecCompletion } from "./exec-completion-delivery-context.js";
+import type { EmbeddedRunAttemptInternalParams } from "./internal-params.js";
 import { wrapStreamFnWithMessageTransform } from "./message-transform-stream-wrapper.js";
 import { isMidTurnPrecheckSignal, type MidTurnPrecheckRequest } from "./midturn-precheck.js";
 import type { RuntimeContextCustomMessage } from "./runtime-context-prompt.js";
@@ -66,12 +68,13 @@ type TrajectoryRecorder = Awaited<ReturnType<typeof createTrajectoryRuntimeRecor
 
 export async function submitEmbeddedAttemptPrompt(input: {
   attempt: Pick<
-    EmbeddedRunAttemptParams,
+    EmbeddedRunAttemptInternalParams,
     | "promptCacheKey"
     | "sessionId"
     | "sessionKey"
     | "skipPreparedUserTurnMessage"
     | "userTurnTranscriptRecorder"
+    | "execCompletionDeliveryRecovery"
   >;
   activeSession: PromptSubmissionSession;
   appendOnlyRuntimeContext?: boolean;
@@ -252,7 +255,10 @@ export async function submitEmbeddedAttemptPrompt(input: {
         if (providerPromptHistoryTruncation.aggregateTruncatedCount > 0) {
           recordAggregateTruncation(attempt);
         }
-        return providerMessages;
+        return projectUndeliveredExecCompletion(
+          providerMessages,
+          attempt.execCompletionDeliveryRecovery,
+        );
       },
     );
     activeSession.agent.streamFn = providerPromptStreamFn;
