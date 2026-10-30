@@ -109,12 +109,10 @@ describe("OpenAI-compatible provider refusals", () => {
       });
       configureAiTransportHost({ buildModelFetch: () => fetchFailure });
 
-      const result = await (
-        await streamOpenAICompletions(model, context, {
-          ...options,
-          signal: controller.signal,
-        })
-      ).result();
+      const result = await streamOpenAICompletions(model, context, {
+        ...options,
+        signal: controller.signal,
+      }).result();
 
       expect(fetchFailure).toHaveBeenCalledTimes(1);
       expect(result.stopReason).toBe(aborted ? "aborted" : "error");
