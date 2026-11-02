@@ -2,6 +2,7 @@ import { expectDefined } from "@openclaw/normalization-core";
 import { asOptionalObjectRecord } from "@openclaw/normalization-core/record-coerce";
 import { normalizeLowercaseStringOrEmpty } from "@openclaw/normalization-core/string-coerce";
 import { truncateUtf16Safe } from "@openclaw/normalization-core/utf16-slice";
+import { projectProviderError } from "../../../packages/ai/src/utils/provider-error.js";
 import {
   buildOAuthRefreshFailureLoginCommand,
   classifyOAuthRefreshFailure,
@@ -51,6 +52,7 @@ import {
   readErrorCauses,
   readErrorName,
 } from "../../infra/errors.js";
+import { formatProviderRefusalText } from "../../shared/assistant-error-format.js";
 import { SkillResourceDeliveryLimitError } from "../../skills/runtime/resource-delivery-error.js";
 import { buildProviderLoginRecovery } from "../provider-login-recovery.js";
 import {
@@ -161,10 +163,17 @@ export function buildPreflightCompactionFailureText(
   if (!normalizedMessage.startsWith(PREFLIGHT_COMPACTION_FAILURE_PREFIX)) {
     return null;
   }
-  const reason = renderUserFacingText(
-    normalizedMessage.slice(PREFLIGHT_COMPACTION_FAILURE_PREFIX.length),
-    { errorContext: true },
-  )
+  const rawReason = normalizedMessage.slice(PREFLIGHT_COMPACTION_FAILURE_PREFIX.length).trim();
+  // Unwrap only compaction-owned prefixes before provider classification; display
+  // sanitization can replace the nested refusal with unrelated failure guidance.
+  const providerReason = rawReason.replace(
+    /^(?:(?:Compaction safeguard could not summarize the session:|Summarization failed for \d+ messages:|Turn prefix summarization failed:)\s*)+/u,
+    "",
+  );
+  if (formatProviderRefusalText(projectProviderError(providerReason))) {
+    return "⚠️ The AI provider refused to summarize this conversation because of a safety or content policy. Your conversation history has been kept. Review the conversation and the provider's policy and access requirements before continuing.";
+  }
+  const reason = renderUserFacingText(rawReason, { errorContext: true })
     .trim()
     .replace(/\s+/gu, " ");
   const isTimeout = classifyCompactionReason(reason) === "timeout";
