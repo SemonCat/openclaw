@@ -62,6 +62,7 @@ export class SystemEventQueueFullError extends Error {
 type SessionQueue = {
   queue: SystemEvent[];
   lastContextKey: string | null;
+  capacityWaiters: Set<(available: boolean) => void>;
 };
 
 const SYSTEM_EVENT_QUEUES_KEY = Symbol.for("openclaw.systemEvents.queues");
@@ -76,6 +77,7 @@ const turnOwners = resolveGlobalSingleton(
       entry.queue = entry.queue.filter((event) => !owners.has(event));
       resetQueueState(key, entry);
       retireSystemEvents(removed);
+      retireSystemEventCapacityWaiters(key, entry);
     }
   },
 );
@@ -90,7 +92,11 @@ function retireSystemEvents(events: readonly SystemEvent[]): void {
 }
 
 function clearSystemEventQueues(value: Map<string, SessionQueue>) {
-  const removed = [...value.values()].flatMap((entry) => entry.queue.splice(0));
+  const entries = [...value.entries()];
+  const removed = entries.flatMap(([, entry]) => entry.queue.splice(0));
+  for (const [key, entry] of entries) {
+    retireSystemEventCapacityWaiters(key, entry);
+  }
   value.clear();
   retireSystemEvents(removed);
 }
@@ -114,6 +120,7 @@ registerSystemEventStoreOwner(SYSTEM_EVENT_QUEUES_KEY, () => {
     entry.queue = retained;
     resetQueueState(key, entry);
     retireSystemEvents(removed);
+    retireSystemEventCapacityWaiters(key, entry);
     recordSystemEventStoreReplaced();
   }
 });
@@ -154,6 +161,7 @@ function getSessionQueue(sessionKey: string): SessionQueue | undefined {
       entry.queue = entry.queue.filter((event) => !cancelled.includes(event));
       resetQueueState(key, entry);
       retireSystemEvents(cancelled);
+      notifySystemEventCapacityWaiters(key, entry);
     }
   }
   return queues.get(key);
@@ -167,6 +175,7 @@ function getOrCreateSessionQueue(key: string): SessionQueue {
   const created: SessionQueue = {
     queue: [],
     lastContextKey: null,
+    capacityWaiters: new Set(),
   };
   queues.set(key, created);
   return created;
@@ -284,7 +293,55 @@ function enqueueOwnedSystemEventEntry(
   entry.queue.push(event);
   // Install the replacement before cancellation callbacks can enqueue more work.
   retireSystemEvents(replaced);
+  notifySystemEventCapacityWaiters(key, entry);
   return event;
+}
+
+/**
+ * Subscribe only while the queue is full. The caller handles a null result by retrying
+ * immediately, covering capacity released before subscription without timers or polling.
+ */
+export function subscribeSystemEventQueueCapacity(
+  sessionKey: string,
+  listener: (available: boolean) => void,
+): (() => void) | null {
+  const key = requireSessionKey(sessionKey);
+  const entry = queues.get(key);
+  if (!entry || entry.queue.length < MAX_EVENTS) {
+    return null;
+  }
+  entry.capacityWaiters.add(listener);
+  return () => {
+    entry.capacityWaiters.delete(listener);
+    deleteEmptySessionQueue(key, entry);
+  };
+}
+
+function notifySystemEventCapacityWaiters(key: string, entry: SessionQueue): void {
+  while (entry.capacityWaiters.size > 0 && (queues.get(key)?.queue.length ?? 0) < MAX_EVENTS) {
+    const waiter = entry.capacityWaiters.values().next().value;
+    if (!waiter) {
+      return;
+    }
+    entry.capacityWaiters.delete(waiter);
+    waiter(true);
+  }
+  deleteEmptySessionQueue(key, entry);
+}
+
+function retireSystemEventCapacityWaiters(key: string, entry: SessionQueue): void {
+  const waiters = [...entry.capacityWaiters];
+  entry.capacityWaiters.clear();
+  for (const waiter of waiters) {
+    waiter(false);
+  }
+  deleteEmptySessionQueue(key, entry);
+}
+
+function deleteEmptySessionQueue(key: string, entry: SessionQueue): void {
+  if (entry.queue.length === 0 && entry.capacityWaiters.size === 0 && queues.get(key) === entry) {
+    queues.delete(key);
+  }
 }
 
 export function enqueueSystemEvent(text: string, options: SystemEventOptions) {
@@ -395,8 +452,11 @@ function drainSystemEventsWith<T>(sessionKey: string, project: (event: SystemEve
   }
   const removed = entry.queue.splice(0);
   entry.lastContextKey = null;
-  queues.delete(key);
+  if (entry.capacityWaiters.size === 0) {
+    queues.delete(key);
+  }
   retireSystemEvents(removed);
+  notifySystemEventCapacityWaiters(key, entry);
   return removed.map(project);
 }
 
@@ -426,7 +486,9 @@ function matchesConsumedSystemEvent(queued: SystemEvent, consumed: SystemEvent):
 function resetQueueState(key: string, entry: SessionQueue) {
   if (entry.queue.length === 0) {
     entry.lastContextKey = null;
-    queues.delete(key);
+    if (entry.capacityWaiters.size === 0) {
+      queues.delete(key);
+    }
     return;
   }
   entry.lastContextKey =
@@ -464,6 +526,7 @@ export function consumeSelectedSystemEventEntries(
   }
   resetQueueState(key, entry);
   retireSystemEvents(retired);
+  notifySystemEventCapacityWaiters(key, entry);
   return selected;
 }
 

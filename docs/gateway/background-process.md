@@ -80,6 +80,11 @@ model turn marked `[OpenClaw exec completion]` even when
 `agents.defaults.heartbeat.every` is `"0m"`: that setting disables recurring polls,
 not completion follow-ups.
 
+If the session's 20-event system queue is full, the completion waits for capacity
+and is admitted once a slot opens. The wait is canceled when the terminal poll
+result is acknowledged, the request is stopped, its retained record expires or is
+evicted, or the Gateway lifecycle resets.
+
 To keep background commands running without automatic completion turns, set:
 
 ```bash

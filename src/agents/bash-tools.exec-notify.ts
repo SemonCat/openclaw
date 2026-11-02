@@ -6,12 +6,24 @@ import {
 import { formatErrorMessage } from "../infra/errors.js";
 import { resolveEventSessionKeyForPolicy } from "../infra/event-session-routing.js";
 import { readExecRequestOwners, withExecRequestOwners } from "../infra/exec-request-context.js";
-import { withSystemEventOwner } from "../infra/system-event-ownership.js";
-import { enqueueSystemEventWithReceipt } from "../infra/system-events.js";
+import {
+  resolveSystemEventQueueKey,
+  withSystemEventOwner,
+} from "../infra/system-event-ownership.js";
+import {
+  enqueueSystemEventWithReceipt,
+  subscribeSystemEventQueueCapacity,
+  SystemEventQueueFullError,
+} from "../infra/system-events.js";
 import { logWarn } from "../logger.js";
 import { parseAgentSessionKey } from "../routing/session-key.js";
 import { isSubagentSessionKey } from "../sessions/session-key-utils.js";
-import { recordNotifyOnExitRemoval, tail, type ProcessSession } from "./bash-process-registry.js";
+import {
+  recordNotifyOnExitRemoval,
+  recordNotifyOnExitRetryCancel,
+  tail,
+  type ProcessSession,
+} from "./bash-process-registry.js";
 import {
   appendExecTimeoutRetryGuidance,
   compactNotifyOutput,
@@ -93,6 +105,7 @@ export function maybeNotifyOnExit(
   const eventText = appendExecTimeoutRetryGuidance(summary, session.exitReason);
   const eventRouting = session.eventRouting ?? {};
   const eventSessionKey = resolveEventSessionKeyForPolicy(sessionKey, eventRouting);
+  const notifySessionTarget = session.notifySessionTarget;
   const eventOptions = withExecRequestOwners(
     {
       sessionKey: eventSessionKey,
@@ -104,32 +117,76 @@ export function maybeNotifyOnExit(
   );
   if (!subagentSession && !isSubagentSessionKey(sessionKey)) {
     const agentId = session.agentId ?? parseAgentSessionKey(eventSessionKey)?.agentId;
-    if (!agentId || !session.notifySessionTarget) {
+    if (!agentId || !notifySessionTarget) {
       logWarn(
         `exec: completion ${session.id} has no admitted session destination; inspect its process result.`,
       );
       return;
     }
-    try {
-      const receipt = enqueueSessionEvent(eventText, {
-        ...eventOptions,
-        agentId,
-        source: "exec",
-        expectedTarget: session.notifySessionTarget,
-      });
-      recordNotifyOnExitRemoval(session, receipt.cancel);
-      void receipt.settled.then((outcome) => {
-        if (outcome.status === "failed") {
-          logWarn(
-            `exec: completion delivery failed (${outcome.error}); inspect the process result.`,
+    let retryCancelled = false;
+    let cancelCapacityWait: (() => void) | undefined;
+    const cancelRetry = () => {
+      retryCancelled = true;
+      cancelCapacityWait?.();
+      cancelCapacityWait = undefined;
+      if (session.notifyOnExitRetryCancel === cancelRetry) {
+        session.notifyOnExitRetryCancel = undefined;
+      }
+    };
+    const enqueueCompletion = () => {
+      if (
+        retryCancelled ||
+        session.terminalPollObserved ||
+        session.requestCancelled ||
+        readExecRequestOwners(session)?.some((owner) => owner.signal.aborted)
+      ) {
+        cancelRetry();
+        return;
+      }
+      try {
+        const receipt = enqueueSessionEvent(eventText, {
+          ...eventOptions,
+          agentId,
+          source: "exec",
+          expectedTarget: notifySessionTarget,
+        });
+        cancelRetry();
+        recordNotifyOnExitRemoval(session, receipt.cancel);
+        void receipt.settled.then((outcome) => {
+          if (outcome.status === "failed") {
+            logWarn(
+              `exec: completion delivery failed (${outcome.error}); inspect the process result.`,
+            );
+          }
+        });
+      } catch (error) {
+        if (error instanceof SystemEventQueueFullError) {
+          const cancel = subscribeSystemEventQueueCapacity(
+            resolveSystemEventQueueKey(eventSessionKey, agentId),
+            (available) => {
+              cancelCapacityWait = undefined;
+              if (!available) {
+                cancelRetry();
+                return;
+              }
+              enqueueCompletion();
+            },
           );
+          if (cancel) {
+            cancelCapacityWait = cancel;
+            recordNotifyOnExitRetryCancel(session, cancelRetry);
+          } else {
+            enqueueCompletion();
+          }
+          return;
         }
-      });
-    } catch (error) {
-      logWarn(
-        `exec: completion was not admitted (${formatErrorMessage(error)}); inspect the process result.`,
-      );
-    }
+        cancelRetry();
+        logWarn(
+          `exec: completion was not admitted (${formatErrorMessage(error)}); inspect the process result.`,
+        );
+      }
+    };
+    enqueueCompletion();
     return;
   }
   // Subagent results remain available to process poll and the announce owner.

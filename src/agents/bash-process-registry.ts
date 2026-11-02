@@ -40,6 +40,7 @@ type ProcessStatus = "running" | "completed" | "failed" | "killed";
 
 /** Removes one queued notify-on-exit event, if it is still pending. */
 type NotifyOnExitRemoval = () => boolean;
+type NotifyOnExitRetryCancel = () => void;
 
 type PendingOutputChunk = {
   stream: "stdout" | "stderr";
@@ -73,6 +74,7 @@ export interface ProcessSession {
   /** Set only after a terminal poll result is delivered or persisted. */
   terminalPollObserved?: boolean;
   notifyOnExitRemoval?: NotifyOnExitRemoval;
+  notifyOnExitRetryCancel?: NotifyOnExitRetryCancel;
   // Deprecated declaration-closure compatibility only; runtime never uses this.
   // ProcessSupervisor owns raw processes. Remove when the public Plugin SDK closure no
   // longer reaches registry types, or at the next compatible boundary change.
@@ -183,6 +185,7 @@ function deleteFinishedSession(id: string): boolean {
   if (!session) {
     return false;
   }
+  cancelNotifyOnExitRetry(session);
   finishedSessions.delete(id);
   finishedSessionOutputChars -= session.aggregated.length;
   return true;
@@ -359,6 +362,21 @@ export function recordNotifyOnExitRemoval(
   session.notifyOnExitRemoval = remove;
 }
 
+/** Retains a capacity-wait cancellation handle only while its process is still eligible. */
+export function recordNotifyOnExitRetryCancel(
+  session: ProcessSession,
+  cancel: NotifyOnExitRetryCancel,
+): void {
+  if (session.notifyOnExitRetryCancel !== cancel) {
+    cancelNotifyOnExitRetry(session);
+  }
+  if (session.terminalPollObserved || session.requestCancelled) {
+    cancel();
+    return;
+  }
+  session.notifyOnExitRetryCancel = cancel;
+}
+
 /** Acknowledges one completion event without touching unrelated queue entries. */
 export function acknowledgeNotifyOnExit(record: {
   notifyOnExitRemoval?: NotifyOnExitRemoval;
@@ -369,13 +387,26 @@ export function acknowledgeNotifyOnExit(record: {
 }
 
 /** Retire notification custody without claiming that retained output was observed. */
-export function removeNotifyOnExit(record: { notifyOnExitRemoval?: NotifyOnExitRemoval }): void {
+export function removeNotifyOnExit(record: {
+  notifyOnExitRemoval?: NotifyOnExitRemoval;
+  notifyOnExitRetryCancel?: NotifyOnExitRetryCancel;
+}): void {
+  cancelNotifyOnExitRetry(record);
   const remove = record.notifyOnExitRemoval;
   if (!remove) {
     return;
   }
   remove();
   record.notifyOnExitRemoval = undefined;
+}
+
+function cancelNotifyOnExitRetry(record: { notifyOnExitRetryCancel?: NotifyOnExitRetryCancel }) {
+  const cancel = record.notifyOnExitRetryCancel;
+  if (!cancel) {
+    return;
+  }
+  record.notifyOnExitRetryCancel = undefined;
+  cancel();
 }
 
 /** Returns the number of live background exec sessions without exposing process details. */
@@ -521,6 +552,9 @@ export function listFinishedSessions() {
 
 /** Test-only reset for in-memory registry state and retention timers. */
 function resetProcessRegistryForTests() {
+  for (const session of [...runningSessions.values(), ...finishedSessions.values()]) {
+    cancelNotifyOnExitRetry(session);
+  }
   runningSessions.clear();
   finishedSessions.clear();
   processSessionStartOrders = new WeakMap();
