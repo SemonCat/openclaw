@@ -1,6 +1,7 @@
 import { normalizeOptionalString } from "@openclaw/normalization-core/string-coerce";
 import type { AgentMessage } from "../../packages/agent-core/src/types.js";
 import type { RuntimeContextFragment } from "../agents/internal-runtime-context.js";
+import { agentSessionKeysMatchByRequestKey } from "../routing/session-key.js";
 import { isStringOption } from "../utils/string-readers.js";
 
 // Input provenance marks whether a user-role message actually came from an
@@ -20,6 +21,17 @@ export type InputProvenance = {
   jobId?: string;
   runId?: string;
 };
+
+export function isCrossSessionSend(input: {
+  sessionKey?: string;
+  inputProvenance?: InputProvenance;
+}): boolean {
+  return (
+    input.inputProvenance?.kind === "inter_session" &&
+    input.inputProvenance.sourceTool === "sessions_send" &&
+    !agentSessionKeysMatchByRequestKey(input.sessionKey, input.inputProvenance.sourceSessionKey)
+  );
+}
 
 export const MAIN_SESSION_RESTART_RECOVERY_SOURCE_TOOL = "main_session_restart_recovery" as const;
 

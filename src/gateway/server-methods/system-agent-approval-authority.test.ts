@@ -5,12 +5,14 @@ import { createOperationalRunInstanceRef } from "../../agents/admitted-run-conte
 import { withGatewayToolCallerIdentity } from "../../agents/tools/gateway-caller-context.js";
 import {
   claimAgentRunDelegatedAuthority,
+  claimAgentRunApprovalAuthority,
   releaseAgentRunDelegatedAuthority,
   resetAgentRunRegistryForTest,
   validateAgentRunDelegatedAuthority,
 } from "../../infra/agent-run-registry.js";
 import type { ExecApprovalDecision } from "../../infra/exec-approvals.js";
 import type { SystemAgentApprovalRequestPayload } from "../../infra/system-agent-approvals.js";
+import { createAgentRuntimeApprovalAuthorityValidator } from "../agent-runtime-approval-authority.js";
 import { createTestApprovalManager } from "../exec-approval-manager.test-support.js";
 import type { WorkerSessionTurnClaim } from "../worker-environments/placement-record.js";
 import { prepareDelegatedSystemAgentApproval } from "./system-agent-approval.js";
@@ -196,7 +198,7 @@ describe("prepareDelegatedSystemAgentApproval", () => {
     );
   });
 
-  it.each(["run", "tool", "gateway", "worker", "session"] as const)(
+  it.each(["run", "tool", "gateway", "worker", "session", "wire-run", "wire-tool"] as const)(
     "fences Full Access when its %s closes during apply preparation",
     async (owner) => {
       const started = createDeferred();
@@ -233,31 +235,53 @@ describe("prepareDelegatedSystemAgentApproval", () => {
       const operationalRunInstance = createOperationalRunInstanceRef("full-access-run");
       const authority = claimAgentRunDelegatedAuthority(operationalRunInstance);
       const controller = new AbortController();
-      const pending = withGatewayToolCallerIdentity(
-        {
-          agentId: "main",
-          sessionKey: "agent:main:main",
-          operationalRunInstance,
-          approvalAuthority: authority,
-          fullPermission: true,
-          gatewayContextResolver: () => liveContext,
-          approvalSignals: [controller.signal],
-          ...(owner === "worker" ? { workerTurnClaim: workerTurnClaim("full-turn") } : {}),
-        },
-        () =>
-          resolveTestProposal({
-            context,
-            sessions,
-            session,
-            sessionId: "delegate-full",
-            delegation: { agentId: "main", sessionKey: "agent:main:main" },
-            proposal,
-          }),
-      );
+      const resolve = () =>
+        resolveTestProposal({
+          context,
+          sessions,
+          session,
+          sessionId: "delegate-full",
+          delegation: { agentId: "main", sessionKey: "agent:main:main" },
+          proposal,
+          ...(owner.startsWith("wire-")
+            ? {
+                trustedAgentRuntime: {
+                  kind: "agentRuntime" as const,
+                  agentId: "main",
+                  sessionKey: "agent:main:main",
+                  operationalRunInstance,
+                  fullPermission: true,
+                  delegatedAuthority: {
+                    kind: "local" as const,
+                    ...claimAgentRunApprovalAuthority(authority, [controller.signal]),
+                  },
+                },
+              }
+            : {}),
+        });
+      if (owner.startsWith("wire-")) {
+        context.validateAgentRuntimeApprovalAuthority =
+          createAgentRuntimeApprovalAuthorityValidator();
+      }
+      const pending = owner.startsWith("wire-")
+        ? resolve()
+        : withGatewayToolCallerIdentity(
+            {
+              agentId: "main",
+              sessionKey: "agent:main:main",
+              operationalRunInstance,
+              approvalAuthority: authority,
+              fullPermission: true,
+              gatewayContextResolver: () => liveContext,
+              approvalSignals: [controller.signal],
+              ...(owner === "worker" ? { workerTurnClaim: workerTurnClaim("full-turn") } : {}),
+            },
+            resolve,
+          );
       await started.promise;
-      if (owner === "run") {
+      if (owner === "run" || owner === "wire-run") {
         releaseAgentRunDelegatedAuthority(authority);
-      } else if (owner === "tool") {
+      } else if (owner === "tool" || owner === "wire-tool") {
         controller.abort();
       } else if (owner === "gateway") {
         liveContext = { ...context };

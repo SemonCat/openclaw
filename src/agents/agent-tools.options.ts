@@ -147,6 +147,9 @@ export type OpenClawCodingToolsOptions = {
   AgentRunChannelContext;
 
 export type InternalCodingToolsOptions = OpenClawCodingToolsOptions & {
+  /** Host recovery can narrow an existing delivery tool to the captured source. */
+  sourceReplyOnly?: true;
+  sourceReplyDeliveryAllowed?: () => boolean;
   awaitSessionDiffBaseline?: () => Promise<void>;
   /** Policy-approved publication unavailable in this workspace, retained for new children. */
   inheritedPublicationToolRef?: { current?: AnyAgentTool };

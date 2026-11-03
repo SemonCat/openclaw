@@ -68,6 +68,43 @@ describe("sendCronAnnouncePayloadStrict", () => {
       });
   });
 
+  it.each([
+    {
+      channel: "mattermost",
+      inspectionUrl: "https://gateway.example/control/(team)/automations?job=job-1",
+      expectedText:
+        "Automation failed\n\n[查看執行紀錄](<https://gateway.example/control/(team)/automations?job=job-1>)",
+    },
+    {
+      channel: "telegram",
+      inspectionUrl: "https://gateway.example/control/(team)/automations?job=job-1",
+      expectedText:
+        "Automation failed\nInspect: https://gateway.example/control/(team)/automations?job=job-1",
+    },
+    ...["team name", "team>name", "team\nname"].map((suffix) => ({
+      channel: "mattermost",
+      inspectionUrl: `https://gateway.example/control/${suffix}`,
+      expectedText: `Automation failed\nInspect: https://gateway.example/control/${suffix}`,
+    })),
+  ])(
+    "renders the inspect footer for resolved $channel with $inspectionUrl",
+    async ({ channel, inspectionUrl, expectedText }) => {
+      const payload = { text: "Automation failed" };
+      Object.freeze(payload);
+
+      await send({ target: { channel, to: "123" }, payload, inspectionUrl });
+
+      expect(mocks.deliverOutboundPayloads).toHaveBeenCalledExactlyOnceWith(
+        expect.objectContaining({
+          channel,
+          payloads: [{ text: expectedText }],
+        }),
+        undefined,
+      );
+      expect(payload).toEqual({ text: "Automation failed" });
+    },
+  );
+
   it("sends all prepared payloads under one destination-scoped intent", async () => {
     const job = makeJob({ kind: "command", argv: ["/bin/echo", "Readiness 65 today"] });
     const payloads = [

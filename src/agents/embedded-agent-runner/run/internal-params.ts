@@ -13,6 +13,7 @@ import type { CompactionRequestBudget } from "../../sessions/compaction/request-
 import type { SystemAgentToolOptions } from "../../tools/system-agent-tool.js";
 import type { ResolvedRunEntryModelSelection } from "../run-entry.types.js";
 import type { DeferredEmbeddedRunLifecycleOwner } from "./deferred-lifecycle-owner.js";
+import type { UndeliveredExecCompletion } from "./exec-completion-delivery-context.js";
 import type { RunEmbeddedAgentParams } from "./params.js";
 import type { EmbeddedRunCompletionCheck } from "./terminal-retry-state.js";
 import type { EmbeddedRunAttemptParams } from "./types.js";
@@ -48,6 +49,10 @@ export type CompactionAccountingFact = Readonly<
 export type RunEmbeddedAgentInternalParams = RunEmbeddedAgentParams & {
   /** The logical run already invoked model routing before preparing its candidate chain. */
   resolvedModelSelection?: ResolvedRunEntryModelSelection;
+  /** Reply owner rechecks current send policy before an exec delivery decision pass. */
+  canRecoverExecCompletionDelivery?: () => boolean;
+  /** Host-only bounded continuation; its message tool stays source-bound. */
+  execCompletionDeliveryRecovery?: UndeliveredExecCompletion;
   preparedTtsPreferences?: PreparedTtsPreferences;
   /** Fail-closed caller input admission against the actual prepared model, before dispatch. */
   assertModelInput?: (model: Pick<Model, "input">) => void;
@@ -92,7 +97,13 @@ export type RunEmbeddedAgentInternalParams = RunEmbeddedAgentParams & {
 };
 
 export type EmbeddedRunAttemptInternalParams = EmbeddedRunAttemptParams &
-  Pick<RunEmbeddedAgentInternalParams, "onContextAccountingEvent" | "onCompactionRequestBudget"> & {
+  Pick<
+    RunEmbeddedAgentInternalParams,
+    | "onContextAccountingEvent"
+    | "onCompactionRequestBudget"
+    | "canRecoverExecCompletionDelivery"
+    | "execCompletionDeliveryRecovery"
+  > & {
     /** The dispatch owner already selected this target, including any compaction successor. */
     preparedSessionTarget?: {
       readonly target: Readonly<BoundAgentRunSessionTarget & SessionTranscriptTargetBinding>;

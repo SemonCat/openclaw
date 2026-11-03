@@ -309,6 +309,11 @@ The cause uses mandatory built-in credential redaction plus
 splitting a surrogate pair. Redaction is not a guarantee that arbitrary private
 text is removed: debug causes can still contain provider or user content. Treat
 debug logs and telemetry as sensitive, and return to `info` after diagnosis.
+Provider refusals carrying `cyber_policy` or a `cyber` refusal diagnostic that remain
+after [automatic cyber-policy escalation](/concepts/model-failover#automatic-cyber-policy-escalation)
+display the possible cybersecurity risk and error code in live replies and saved history.
+The message asks you to review the request and the provider's access requirements
+and check any actions that may have completed before the refusal.
 
 Responses output-identity conflicts record the event type, output position,
 expected and observed item types, and whether a tool call completed, without
