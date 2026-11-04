@@ -1,6 +1,7 @@
 import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { admitReplyTurn } from "../../auto-reply/reply/reply-turn-admission.js";
+import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../../config/io.js";
 import type { InternalSessionEntry as SessionEntry } from "../../config/sessions.js";
 import { recordLifecycleFence } from "../../config/sessions/restart-recovery-state.js";
 import * as sessionAccessor from "../../config/sessions/session-accessor.js";
@@ -52,6 +53,7 @@ describe("yielded requester admission", () => {
   });
 
   beforeEach(async () => {
+    setRuntimeConfigSnapshot({});
     storePath = fixtureStore();
     lifecycleGeneration = getAgentEventLifecycleGeneration();
     child.requesterTurnRunId = undefined;
@@ -73,6 +75,7 @@ describe("yielded requester admission", () => {
     clearAgentRunContext("yielded-run");
     vi.restoreAllMocks();
     await resetCase();
+    clearRuntimeConfigSnapshot();
   });
 
   it.each(["current", "previous"])(

@@ -303,9 +303,7 @@ function* assembleOpenClawCodingTools(
             notifyOnExitEmptySuccess:
               options?.exec?.notifyOnExitEmptySuccess ?? execConfig.notifyOnExitEmptySuccess,
           },
-          processDefaults: {
-            scopeKey,
-          },
+          processDefaults: { scopeKey },
           recordToolPrepStage: options?.recordToolPrepStage,
         })
       : [];

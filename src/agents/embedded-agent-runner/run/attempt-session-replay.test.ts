@@ -128,26 +128,36 @@ describe("context engine bootstrap", () => {
   });
 });
 
-describe("redacted direct admission replay", () => {
-  const credential = "synthetic-fixture-value-for-redaction";
+describe("source-preserving direct admission replay", () => {
+  const modelPrompt = "[Tue 2026-11-03 00:00 UTC] Finish this exact turn";
+  const inputText =
+    modelPrompt +
+    "\n\n" +
+    "Quoted thread: https://example.invalid/oauth?token=synthetic-fixture-source-value";
 
   it.each([false, true])(
-    "dispatches the admitted user once after storage redaction (selected=%s)",
+    "preserves admitted source while dispatching its model projection once (selected=%s)",
     async (selectedOwner) => {
       await withDirectlyAdmittedTurn(
-        `Finish this exact turn\n\nQuoted thread: https://example.invalid/oauth?token=${credential}`,
+        inputText,
         async (fixture) => {
+          fixture.attempt.prompt = modelPrompt;
           const users = () =>
             loadTranscriptEventsSync(fixture.target).filter(
               (entry) => (entry as { message?: { role?: string } }).message?.role === "user",
             );
           const admitted = users();
           expect(admitted).toHaveLength(1);
-          expect(JSON.stringify(admitted)).not.toContain(credential);
-          // Re-resolving the unstaged source restores bytes that admission redacted.
-          expect(
-            JSON.stringify(await fixture.attempt.userTurnTranscriptRecorder!.resolveMessage()),
-          ).toContain(credential);
+          const current = admitted[0];
+          assert(
+            isRecord(current) && isRecord(current.message),
+            "Expected the admitted user entry",
+          );
+          expect(current.message.content).toBe(inputText);
+          expect(current.message.content).not.toBe(fixture.attempt.prompt);
+          expect(await fixture.attempt.userTurnTranscriptRecorder!.resolveMessage()).toEqual(
+            current.message,
+          );
           await withReplaySession(fixture, false, async (session, submit) => {
             streamMocks.streamSimple.mockImplementation((model) =>
               createAssistantResultStream(
@@ -157,9 +167,25 @@ describe("redacted direct admission replay", () => {
             await submit();
             expect(Reflect.get(session.messages.at(-1)!, "errorMessage")).toBeUndefined();
             expect(streamMocks.streamSimple).toHaveBeenCalledOnce();
+            const messages = streamMocks.streamSimple.mock.calls[0]![1].messages;
+            const sourceUsers = messages.filter(
+              (message) => message.role === "user" && message.runtimeContextCarrier !== true,
+            );
+            expect(sourceUsers.map((message) => message.content)).toEqual([modelPrompt]);
             expect(session.getLastAssistantText()).toBe("Continued after admission");
           });
-          expect(users()).toEqual(admitted);
+          expect(users()).toEqual([
+            {
+              ...current,
+              message: {
+                ...current.message,
+                __openclaw: {
+                  ...(isRecord(current.message["__openclaw"]) ? current.message["__openclaw"] : {}),
+                  modelPromptProjection: { version: 1, text: modelPrompt },
+                },
+              },
+            },
+          ]);
         },
         { selectedOwner },
       );

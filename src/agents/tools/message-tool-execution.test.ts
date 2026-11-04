@@ -52,11 +52,7 @@ import { readToolResultDetails } from "../tool-result-error.js";
 import { jsonResult } from "./common.js";
 import { createMessageTool } from "./message-tool-execution.js";
 
-const EMPTY_CATALOG = {
-  version: 0,
-  channels: [],
-  getChannel: () => undefined,
-} as const;
+const EMPTY_CATALOG = { version: 0, channels: [], getChannel: () => undefined } as const;
 
 afterEach(() => {
   clearRuntimeConfigSnapshot();
@@ -102,11 +98,13 @@ describe("inter-session current-source routing", () => {
       },
     };
     setActivePluginRegistry(createTestRegistry([{ pluginId: plugin.id, source: "test", plugin }]));
+    const config: OpenClawConfig = {
+      agents: { entries: { main: {} } },
+      channels: { [channel]: { enabled: true } },
+    };
+    setRuntimeConfigSnapshot(options.config ?? config);
     const tool = createMessageTool({
-      config: {
-        agents: { entries: { main: {} } },
-        channels: { [channel]: { enabled: true } },
-      },
+      config,
       preparedMessageToolCatalog: EMPTY_CATALOG,
       currentChannelProvider: "webchat",
       agentSessionKey: parentSessionKey,
@@ -617,11 +615,7 @@ describe("message tool terminal source actions", () => {
     payload?: Record<string, unknown>;
     completes: boolean;
   }>([
-    {
-      name: "explicit terminal reaction",
-      args: { messageId: "inbound-1", final: true },
-      completes: true,
-    },
+    { name: "explicit reaction", args: { messageId: "inbound-1", final: true }, completes: true },
     { name: "implicit current-message reaction", args: { final: true }, completes: true },
     {
       name: "normalized current conversation",
@@ -662,11 +656,7 @@ describe("message tool terminal source actions", () => {
     },
     { name: "blank reaction", args: { final: true, emoji: "  " }, completes: false },
     { name: "missing reaction", args: { final: true, emoji: undefined }, completes: false },
-    {
-      name: "another message",
-      args: { messageId: "other-message", final: true },
-      completes: false,
-    },
+    { name: "other message", args: { messageId: "other-message", final: true }, completes: false },
     { name: "another conversation", args: { target: "C87654321", final: true }, completes: false },
     { name: "failed reaction", args: { final: true }, payload: { ok: false }, completes: false },
     {

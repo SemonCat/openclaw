@@ -211,18 +211,18 @@ it("retries a completion once when system-event capacity opens", async () => {
   await process.finish();
 
   expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
-  expect(enqueueSessionEvent.mock.results[0]?.type).toBe("throw");
+  expect(vi.mocked(enqueueSessionEvent).mock.results[0]?.type).toBe("throw");
   expect(contexts()).toEqual(fillers.map((event) => event.contextKey));
 
   expect(consumeSelectedSystemEventEntries(QUEUE_KEY, [fillers[0]!])).toHaveLength(1);
 
   expect(enqueueSessionEvent).toHaveBeenCalledTimes(2);
-  const retried = enqueueSessionEvent.mock.results.at(-1);
+  const retried = vi.mocked(enqueueSessionEvent).mock.results.at(-1);
   if (retried?.type !== "return") {
     throw new Error("Expected the retried completion receipt");
   }
-  expect(enqueueSessionEvent.mock.calls[1]?.[1].expectedTarget).toBe(
-    enqueueSessionEvent.mock.calls[0]?.[1].expectedTarget,
+  expect(vi.mocked(enqueueSessionEvent).mock.calls[1]?.[1].expectedTarget).toBe(
+    vi.mocked(enqueueSessionEvent).mock.calls[0]?.[1].expectedTarget,
   );
   await expect(retried.value.accepted).resolves.toEqual({ ok: true });
   expect(contexts().filter((context) => context === `exec:${process.run.session.id}`)).toHaveLength(

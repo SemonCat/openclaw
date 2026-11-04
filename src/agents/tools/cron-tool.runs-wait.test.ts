@@ -1,6 +1,7 @@
 import { expectDefined } from "@openclaw/normalization-core";
 import { Value } from "typebox/value";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { clearRuntimeConfigSnapshot, setRuntimeConfigSnapshot } from "../../config/config.js";
 import { createCronTool } from "./cron-tool.js";
 
 const pending = { entries: [], total: 0, offset: 0, limit: 1, hasMore: false, nextOffset: null };
@@ -18,7 +19,11 @@ const finished = {
   ],
   total: 1,
 };
-afterEach(() => vi.useRealTimers());
+beforeEach(() => setRuntimeConfigSnapshot({}));
+afterEach(() => {
+  vi.useRealTimers();
+  clearRuntimeConfigSnapshot();
+});
 
 describe("automation exact-run follow-up", () => {
   it.each([
