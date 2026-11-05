@@ -71,7 +71,7 @@ export interface ProcessSession {
   notifyOnExit?: boolean;
   notifyOnExitEmptySuccess?: boolean;
   exitNotified?: boolean;
-  /** Set only after a terminal poll result is delivered or persisted. */
+  /** Set only after a terminal poll or complete retained log is delivered or persisted. */
   terminalPollObserved?: boolean;
   notifyOnExitRemoval?: NotifyOnExitRemoval;
   notifyOnExitRetryCancel?: NotifyOnExitRetryCancel;

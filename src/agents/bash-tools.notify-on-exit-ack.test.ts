@@ -22,6 +22,7 @@ import {
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
 import { captureExecRequestCancellation } from "./bash-process-control.js";
+import { appendOutput } from "./bash-process-registry.js";
 import { resetProcessRegistryForTests } from "./bash-process-registry.test-support.js";
 import { startDeferredNotifyRun } from "./bash-tools.notify-on-exit-ack.test-support.js";
 import { createProcessTool } from "./bash-tools.process.js";
@@ -202,6 +203,61 @@ it("keeps an identical successor queued when an earlier consumer settles", async
   expect(peekSystemEventEntries(QUEUE_KEY)).toEqual(queued);
   acknowledgeInternalToolResult(successorResult);
   expect(peekSystemEventEntries(QUEUE_KEY)).toEqual([]);
+});
+
+it("cancels a completion only after a complete terminal log is delivered", async () => {
+  const process = await startNotifyRun();
+  const receipt = await finishNotifyRun(process);
+  enqueueSystemEventEntry("unrelated", { sessionKey: QUEUE_KEY, contextKey: "marker" });
+
+  const result = await processTool.execute("read-completed-log", {
+    action: "log",
+    sessionId: process.run.session.id,
+    limit: 100,
+  });
+  expect(result.details).toMatchObject({ status: "completed", output: "producer output" });
+  expect(contexts()).toEqual([`exec:${process.run.session.id}`, "marker"]);
+
+  acknowledgeInternalToolResult(result);
+  expect(contexts()).toEqual(["marker"]);
+  await expect(receipt.settled).resolves.toMatchObject({
+    status: "cancelled",
+    executionStarted: false,
+  });
+});
+
+it.each([
+  { name: "default tail", page: {} },
+  { name: "explicit tail", page: { limit: 100 } },
+  { name: "prefix", page: { offset: 0, limit: 100 } },
+  { name: "suffix", page: { offset: 1 } },
+  { name: "empty page", page: { limit: 0 } },
+])("keeps the completion after reading a partial log ($name)", async ({ page }) => {
+  const process = await startNotifyRun();
+  appendOutput(process.run.session, "stdout", "x\n".repeat(200));
+  await finishNotifyRun(process);
+
+  acknowledgeInternalToolResult(
+    await processTool.execute("read-partial-log", {
+      action: "log",
+      sessionId: process.run.session.id,
+      ...page,
+    }),
+  );
+  expect(contexts()).toEqual([`exec:${process.run.session.id}`]);
+});
+
+it("keeps a future completion after reading the running log", async () => {
+  const process = await startNotifyRun();
+  const result = await processTool.execute("read-running-log", {
+    action: "log",
+    sessionId: process.run.session.id,
+  });
+  expect(result.details).toMatchObject({ status: "running", output: "producer output" });
+  acknowledgeInternalToolResult(result);
+
+  await finishNotifyRun(process);
+  expect(contexts()).toEqual([`exec:${process.run.session.id}`]);
 });
 
 it("retries a completion once when system-event capacity opens", async () => {

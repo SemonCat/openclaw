@@ -108,9 +108,9 @@ export function sliceLogLines(
   text: string,
   offset?: number,
   limit?: number,
-): { slice: string; totalLines: number; totalChars: number } {
+): { slice: string; totalLines: number; totalChars: number; complete: boolean } {
   if (!text) {
-    return { slice: "", totalLines: 0, totalChars: 0 };
+    return { slice: "", totalLines: 0, totalChars: 0, complete: true };
   }
   const normalized = text.replace(/\r\n/g, "\n");
   const lines = normalized.split("\n");
@@ -129,7 +129,12 @@ export function sliceLogLines(
     typeof limit === "number" && Number.isFinite(limit)
       ? start + Math.max(0, Math.floor(limit))
       : undefined;
-  return { slice: lines.slice(start, end).join("\n"), totalLines, totalChars };
+  return {
+    slice: lines.slice(start, end).join("\n"),
+    totalLines,
+    totalChars,
+    complete: start === 0 && (end === undefined || end >= totalLines),
+  };
 }
 
 /** Derives a compact human label from a shell command. */
