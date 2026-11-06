@@ -146,8 +146,9 @@ function* assembleOpenClawCodingTools(
   // The verified requester profile owns completion authority; its delivery grant
   // stays source-bound even when parent tools remain available to the turn.
   const sourceReplyOnly =
-    capabilityProfile.policy.requesterPolicySource === "completion-handoff" &&
-    options?.sourceReplyDeliveryMode === "message_tool_only";
+    options?.sourceReplyOnly === true ||
+    (capabilityProfile.policy.requesterPolicySource === "completion-handoff" &&
+      options?.sourceReplyDeliveryMode === "message_tool_only");
   const localModelLeanPreserveToolNames = resolveLocalModelLeanPreserveToolNames({
     toolNames: capabilityProfile.policy.explicitToolOverrideAllowlist,
     forceMessageTool: options?.forceMessageTool,
@@ -300,9 +301,7 @@ function* assembleOpenClawCodingTools(
             notifyOnExitEmptySuccess:
               options?.exec?.notifyOnExitEmptySuccess ?? execConfig.notifyOnExitEmptySuccess,
           },
-          processDefaults: {
-            scopeKey,
-          },
+          processDefaults: { scopeKey },
           recordToolPrepStage: options?.recordToolPrepStage,
         })
       : [];
@@ -642,6 +641,7 @@ function* assembleOpenClawCodingTools(
       sessionKey: executionSessionKey,
       accountId: gatewayCaller.accountId,
       capabilityProfile,
+      sourceReplyDeliveryAllowed: options?.sourceReplyDeliveryAllowed,
       sessionEventSourcePolicy: options?.sessionEventSourcePolicy ?? {
         toolsAllow: sessionEventToolNames(finalizedTools, turnAuthorized, capabilityProfile),
       },

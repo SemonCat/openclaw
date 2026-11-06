@@ -535,6 +535,19 @@ export function assignTransportErrorDetails(
   }
   if (
     projection.stopReason === "error" &&
+    projection.errorCode === "cyber_policy" &&
+    !output.diagnostics?.some((diagnostic) => diagnostic.type === "provider_refusal")
+  ) {
+    appendAssistantMessageDiagnostic(
+      output,
+      createAssistantMessageDiagnostic("provider_refusal", projection.errorMessage, {
+        provider: output.provider,
+        category: "cyber",
+      }),
+    );
+  }
+  if (
+    projection.stopReason === "error" &&
     output.content.length === 0 &&
     isTransientNetworkError(projectDiagnosticValue(error)) &&
     !output.diagnostics?.some((diagnostic) => diagnostic.type === "provider_transport_failure")

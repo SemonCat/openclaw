@@ -34,6 +34,7 @@ import { SessionManager } from "../../sessions/session-manager.js";
 import {
   appendCompletedToolWork,
   appendOversizedCacheSnapshot,
+  withDirectlyAdmittedTurn,
   withInterruptedTurn,
   withReplaySession,
 } from "./attempt-session-replay.test-support.js";
@@ -126,6 +127,71 @@ describe("context engine bootstrap", () => {
       { settledPrefix: true },
     );
   });
+});
+
+describe("source-preserving direct admission replay", () => {
+  const modelPrompt = "[Tue 2026-11-03 00:00 UTC] Finish this exact turn";
+  const inputText =
+    modelPrompt +
+    "\n\n" +
+    "Quoted thread: https://example.invalid/oauth?token=synthetic-fixture-source-value";
+
+  it.each([false, true])(
+    "preserves admitted source while dispatching its model projection once (selected=%s)",
+    async (selectedOwner) => {
+      await withDirectlyAdmittedTurn(
+        inputText,
+        async (fixture) => {
+          fixture.attempt.prompt = modelPrompt;
+          const users = () =>
+            loadTranscriptEventsSync(fixture.target).filter(
+              (entry) => (entry as { message?: { role?: string } }).message?.role === "user",
+            );
+          const admitted = users();
+          expect(admitted).toHaveLength(1);
+          const current = admitted[0];
+          assert(
+            isRecord(current) && isRecord(current.message),
+            "Expected the admitted user entry",
+          );
+          expect(current.message.content).toBe(inputText);
+          expect(current.message.content).not.toBe(fixture.attempt.prompt);
+          expect(await fixture.attempt.userTurnTranscriptRecorder!.resolveMessage()).toEqual(
+            current.message,
+          );
+          await withReplaySession(fixture, false, async (session, submit) => {
+            streamMocks.streamSimple.mockImplementation((model) =>
+              createAssistantResultStream(
+                createAssistant(model, [{ type: "text", text: "Continued after admission" }]),
+              ),
+            );
+            await submit();
+            expect(Reflect.get(session.messages.at(-1)!, "errorMessage")).toBeUndefined();
+            expect(streamMocks.streamSimple).toHaveBeenCalledOnce();
+            const messages = streamMocks.streamSimple.mock.calls[0]![1].messages;
+            const sourceUsers = messages.filter(
+              (message) => message.role === "user" && message.runtimeContextCarrier !== true,
+            );
+            expect(sourceUsers.map((message) => message.content)).toEqual([modelPrompt]);
+            expect(session.getLastAssistantText()).toBe("Continued after admission");
+          });
+          expect(users()).toEqual([
+            {
+              ...current,
+              message: {
+                ...current.message,
+                __openclaw: {
+                  ...(isRecord(current.message["__openclaw"]) ? current.message["__openclaw"] : {}),
+                  modelPromptProjection: { version: 1, text: modelPrompt },
+                },
+              },
+            },
+          ]);
+        },
+        { selectedOwner },
+      );
+    },
+  );
 });
 
 describe("interrupted canonical user replay", () => {

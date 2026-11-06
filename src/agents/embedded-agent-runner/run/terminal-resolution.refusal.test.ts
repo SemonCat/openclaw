@@ -57,7 +57,7 @@ describe("terminal refusal resolution", () => {
             payloads: [
               {
                 isError: true,
-                text: "The provider refused this request (category: cyber). Revise the request and try again.",
+                text: "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
               },
             ],
           },

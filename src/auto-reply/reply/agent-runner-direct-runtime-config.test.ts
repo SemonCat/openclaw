@@ -658,6 +658,60 @@ describe("runReplyAgent runtime config", () => {
     });
   });
 
+  it.each([
+    { reason: "context_overflow" },
+    { reason: "auth profile mismatch" },
+    { reason: "request timed out", timeout: true },
+    { reason: "provider unavailable while reviewing safety filters and cyber_policy" },
+    { reason: "example-model did not refuse this request (safety filter: cyber_policy)" },
+    ...([undefined, "off"] as const).map((verbose) => ({
+      reason:
+        "Compaction safeguard could not summarize the session: Summarization failed for 64 messages: Turn prefix summarization failed: example-model refused this request (safety filter: cyber_policy - This content was flagged for possible cybersecurity risk. PRIVATE_DETAIL_CANARY) via Codex | summarization_failed",
+      refusal: true,
+      verbose,
+    })),
+  ])(
+    "surfaces required preflight failure ($reason) after memory exhaustion without resetting",
+    async ({ reason, ...testCase }) => {
+      const { replyParams, followupRun } = createDirectRuntimeReplyParams();
+      if ("verbose" in testCase && testCase.verbose !== undefined) {
+        replyParams.resolvedVerboseLevel = testCase.verbose;
+      }
+      const sessionEntry = {
+        sessionId: "session-1",
+        lifecycleRevision: "original-generation",
+        updatedAt: 1,
+        compactionCount: 4,
+      };
+      const sessionSnapshot = { ...sessionEntry };
+      replyParams.sessionEntry = sessionEntry;
+      runMemoryFlushIfNeededMock.mockResolvedValue({
+        sessionEntry,
+        outcome: "exhausted",
+      });
+      runSessionCompactionIfNeededMock.mockImplementation(async (params: PreflightParams) => {
+        await runRequiredCheckpoint(params);
+        throw new Error(`Preflight compaction required but failed: ${reason}`);
+      });
+
+      const result = await runReplyAgent(replyParams);
+
+      if (!result || Array.isArray(result)) {
+        throw new Error("expected a single preflight compaction failure reply payload");
+      }
+      expect(result.text).toBe(
+        "refusal" in testCase
+          ? "⚠️ The AI provider refused to summarize this conversation because of a safety or content policy. Your conversation history has been kept. Review the conversation and the provider's policy and access requirements before continuing."
+          : `⚠️ This conversation is too long, and ${"timeout" in testCase ? "shortening it took too long." : "OpenClaw couldn't shorten it."} Try again, use /compact, or use /new to start a fresh session.`,
+      );
+      expect(result.isError).toBe(true);
+      expect(getReplyPayloadMetadata(result)?.deliverDespiteSourceReplySuppression).toBe(true);
+      expect(followupRun.run.sessionId).toBe(sessionSnapshot.sessionId);
+      expect(sessionEntry).toEqual(sessionSnapshot);
+      expect(executeAgentTurnMock).not.toHaveBeenCalled();
+    },
+  );
+
   it.each(["abortByUser", "abortForRestart"] as const)(
     "records %s during memory flush as cancellation without starting the main turn",
     async (abortMethod) => {

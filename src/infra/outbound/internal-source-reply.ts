@@ -7,6 +7,7 @@ import type { SourceReplyDeliveryMode } from "../../auto-reply/get-reply-options
 import type { ChannelThreadingToolContext } from "../../channels/plugins/types.public.js";
 import type { OpenClawConfig } from "../../config/types.openclaw.js";
 import { parseSessionDeliveryRoute } from "../../routing/session-key.js";
+import { isCrossSessionSend, type InputProvenance } from "../../sessions/input-provenance.js";
 import { INTERNAL_MESSAGE_CHANNEL, normalizeMessageChannel } from "../../utils/message-channel.js";
 import { readTrimmedStringAlias } from "../../utils/string-readers.js";
 import { resolveOutboundChannelPlugin } from "./channel-resolution.js";
@@ -17,6 +18,7 @@ type InternalSourceReplySinkInput = {
   action: string;
   toolContext?: ChannelThreadingToolContext;
   sessionKey?: string;
+  inputProvenance?: InputProvenance;
   sourceReplyDeliveryMode?: SourceReplyDeliveryMode;
 };
 
@@ -34,6 +36,9 @@ function hasCurrentSourceReplyContext(input: InternalSourceReplySinkInput): bool
     return false;
   }
   if (provider === INTERNAL_MESSAGE_CHANNEL) {
+    if (isCrossSessionSend(input)) {
+      return true;
+    }
     // The message tool replaces ambient webchat context with an external route
     // encoded in the session key. Do not classify that route as a private sink.
     const route = parseSessionDeliveryRoute(input.sessionKey);

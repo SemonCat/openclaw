@@ -62,7 +62,7 @@ describe("Gateway Codex failure recovery with automatic cyber failover off", () 
       totalTurnStartCount: 2,
       visibleReplies: [LATER_TURN_TEXT],
       terminalFailureSummary:
-        "Your request couldn't be completed: The provider refused this request (category: cyber). Revise the request and try again.",
+        "Your request couldn't be completed: The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results.",
     },
     {
       failureKind: "misalignment",

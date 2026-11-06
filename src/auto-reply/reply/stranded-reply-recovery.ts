@@ -2,6 +2,7 @@ import { isRuntimeToolAllowed } from "../../agents/tool-policy-match.js";
 import { formatSystemTurnPrompt } from "../../sessions/system-turn-prompt.js";
 import { SkillLibraryError } from "../../skills/skill-library-error.js";
 import type { SourceReplyDeliveryMode } from "../get-reply-options.types.js";
+import { isExecCompletionTurn } from "../internal-turn-source.js";
 import {
   getReplyPayloadMetadata,
   isReplyPayloadTerminalContent,
@@ -44,6 +45,9 @@ export function resolveStrandedReplyRecovery(params: {
 }): StrandedReplyRecovery {
   // Host-owned payloads can still be awaiting transport when completion bookkeeping runs.
   if (
+    // Completion prose is private, even when long. Its embedded terminal owner
+    // offers a bounded delivery decision that can explicitly choose silence.
+    isExecCompletionTurn({ InputProvenance: params.base.run.inputProvenance }) ||
     !shouldClassifyPrivateMessageToolFinal(params) ||
     params.payloads.some(
       (payload) =>

@@ -7,6 +7,7 @@ import {
 import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
 import { isSilentReplyText, SILENT_REPLY_TOKEN } from "../../../auto-reply/tokens.js";
 import { formatErrorMessage } from "../../../infra/errors.js";
+import { formatProviderRefusalText } from "../../../shared/assistant-error-format.js";
 import {
   hasAcceptedSessionSpawn,
   hasCompletionMessageSessionSpawn,
@@ -203,8 +204,9 @@ export function resolveIncompleteTurnPayloadText(params: {
           code: failureFacts.code,
         }))
       : undefined);
+  const providerRefusalText = assistant ? formatProviderRefusalText(assistant) : undefined;
   if (params.hadPotentialSideEffects || params.attempt.replayMetadata.hadPotentialSideEffects) {
-    return `${promptFailureText ?? "⚠️ Agent couldn't generate a response."} Note: some tool actions may have already been executed — please verify before retrying.`;
+    return `${promptFailureText ?? providerRefusalText ?? "⚠️ Agent couldn't generate a response."} Note: some tool actions may have already been executed — please verify before retrying.`;
   }
   if (textToolCallFailureText) {
     return `${textToolCallFailureText} Please try again or use a model with native tool calling.`;
@@ -212,8 +214,8 @@ export function resolveIncompleteTurnPayloadText(params: {
   if (preflightFailureText !== undefined) {
     return preflightFailureText;
   }
-  if (assistant && isProviderRefusalAssistantError(assistant)) {
-    return formatUserFacingAssistantErrorText(assistant);
+  if (providerRefusalText) {
+    return providerRefusalText;
   }
   const authFailure = params.terminalFailure;
   const reason = authFailure?.assistantProfileFailureReason;
