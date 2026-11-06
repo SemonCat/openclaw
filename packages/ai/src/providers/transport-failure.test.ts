@@ -59,6 +59,84 @@ const implementations = [
   },
 ];
 
+describe("OpenAI-compatible provider refusals", () => {
+  const refusal =
+    "test-model refused this request (safety filter: cyber_policy \u2014 Review access requirements.) via Codex";
+
+  it.each([
+    { name: "message-only refusal", message: refusal, refused: true },
+    { name: "structured refusal", message: "Request refused", code: "cyber_policy", refused: true },
+    { name: "SSE refusal", message: refusal, streaming: true, refused: true },
+    {
+      name: "SSE refusal after text",
+      message: refusal,
+      streaming: true,
+      partial: true,
+      refused: true,
+    },
+    {
+      name: "ordinary policy mention",
+      message: "The cyber_policy documentation is temporarily unavailable",
+      refused: false,
+    },
+    {
+      name: "different policy category",
+      message: refusal.replace("cyber_policy", "other_policy"),
+      refused: false,
+    },
+    { name: "explicit different code", message: refusal, code: "invalid_request", refused: false },
+    { name: "caller abort", message: refusal, aborted: true, refused: false },
+  ])(
+    "preserves the terminal contract for $name",
+    async ({ message, code, streaming, partial, aborted, refused }) => {
+      const controller = new AbortController();
+      const fetchFailure = vi.fn<typeof fetch>(async () => {
+        if (aborted) {
+          controller.abort();
+        }
+        const error = { message, type: "api_error", ...(code ? { code } : {}) };
+        if (streaming) {
+          const delta = { choices: [{ index: 0, delta: { content: "Completed work." } }] };
+          return new Response(
+            `${partial ? `data: ${JSON.stringify(delta)}\n\n` : ""}data: ${JSON.stringify({ error })}\n\n`,
+            { headers: { "content-type": "text/event-stream" } },
+          );
+        }
+        return new Response(JSON.stringify({ error }), {
+          status: 500,
+          headers: { "content-type": "application/json" },
+        });
+      });
+      configureAiTransportHost({ buildModelFetch: () => fetchFailure });
+
+      const result = await streamOpenAICompletions(model, context, {
+        ...options,
+        signal: controller.signal,
+      }).result();
+
+      expect(fetchFailure).toHaveBeenCalledTimes(1);
+      expect(result.stopReason).toBe(aborted ? "aborted" : "error");
+      expect(result.content).toEqual(partial ? [{ type: "text", text: "Completed work." }] : []);
+      if (refused) {
+        expect(result.errorCode).toBe("cyber_policy");
+        expect(result.diagnostics).toContainEqual(
+          expect.objectContaining({
+            type: "provider_refusal",
+            details: { provider: "openai", category: "cyber" },
+          }),
+        );
+      } else {
+        expect(result.diagnostics?.some((entry) => entry.type === "provider_refusal")).not.toBe(
+          true,
+        );
+        if (!aborted) {
+          expect(result.errorCode).toBe(code ?? "500");
+        }
+      }
+    },
+  );
+});
+
 describe.each(implementations)(
   "$name transport failures",
   ({ model: providerModel, createStream }) => {

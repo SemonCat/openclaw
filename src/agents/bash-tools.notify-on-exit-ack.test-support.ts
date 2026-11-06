@@ -1,3 +1,4 @@
+import type { ExecRequestOwner } from "../infra/exec-request-context.js";
 import type { ManagedRun } from "../process/supervisor/index.js";
 import type { SpawnInput } from "../process/supervisor/types.js";
 import { createDeferredCore } from "../shared/deferred.js";
@@ -14,6 +15,7 @@ export async function startDeferredNotifyRun(params: {
   sessionKey: string;
   agentId?: string;
   notifyDeliveryContext?: DeliveryContext;
+  requestOwners?: readonly ExecRequestOwner[];
 }) {
   const exit = createDeferredCore<Awaited<ReturnType<ManagedRun["wait"]>>>();
   const activity = { resultSettled: false, lastOutputAtMs: Date.now() };
@@ -39,6 +41,7 @@ export async function startDeferredNotifyRun(params: {
     sessionKey: params.sessionKey,
     agentId: params.agentId,
     notifyDeliveryContext: params.notifyDeliveryContext,
+    requestOwners: params.requestOwners,
     timeoutSec: null,
   });
   markBackgrounded(run.session);

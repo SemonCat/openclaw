@@ -7,6 +7,18 @@ type InternalTurnContext = Pick<
   "InternalTurnSource" | "Provider" | "Surface" | "OriginatingChannel"
 >;
 
+/** Includes the shipped heartbeat/SDK labels as well as ordinary event handoffs. */
+export function isExecCompletionTurn(
+  ctx: Pick<MsgContext, "InternalTurnSource" | "InputProvenance">,
+): boolean {
+  return (
+    ctx.InternalTurnSource === "exec" ||
+    (ctx.InputProvenance?.kind === "internal_system" &&
+      (ctx.InputProvenance.sourceTool === "exec" ||
+        ctx.InputProvenance.sourceTool === "exec-event"))
+  );
+}
+
 /** Keep wake history compact while preserving the producer's actual event identity. */
 export function resolveInternalTurnTranscript(
   ctx: Pick<MsgContext, "InputProvenance" | "InternalTurnSource">,

@@ -32,6 +32,7 @@ import {
   reportEmbeddedRunSuccessfulAuthBinding,
 } from "./auth-profile-success.js";
 import type { EmbeddedRunContextRecoveryState } from "./context-recovery-state.js";
+import { tryRecoverExecCompletionDelivery } from "./exec-completion-delivery.js";
 import type { EmbeddedRunFailoverRetryController } from "./failover-retry-controller.js";
 import { resolveFinalAssistantVisibleText } from "./helpers.js";
 import { countSettledTurnDeliveryPayloads } from "./incomplete-turn-classification.js";
@@ -74,10 +75,7 @@ const COMPACTION_CONTINUATION_RETRY_INSTRUCTION =
 const BEFORE_AGENT_FINALIZE_RETRY_PROMPT_PREFIX =
   "Before accepting the previous final answer, apply this revision request and produce the revised final answer. Do not repeat completed work or rerun tools unless the request explicitly requires it.";
 
-type TerminalPresentationObservation = {
-  terminalPresentation?: string;
-  toolCallOrdinal?: number;
-};
+type TerminalPresentationObservation = { terminalPresentation?: string; toolCallOrdinal?: number };
 
 export function createTerminalToolPresentationTracker() {
   let latestOrdinal = -1;
@@ -249,6 +247,21 @@ export async function resolveEmbeddedRunTerminal(input: {
   // A failed isolated finalization is terminal for this user turn. Do not let
   // its settled side effects cascade into any ordinary retry family.
   const settledTurnFinalizationAttempted = input.settledTurnFinalizationOutcome !== "not-attempted";
+  if (
+    tryRecoverExecCompletionDelivery({
+      runParams,
+      attempt,
+      attemptAssistant: input.attemptAssistant,
+      prepared: input.prepared,
+      retryState,
+      sessionPromptState,
+      terminalInterrupted,
+      settledTurnFinalizationAttempted,
+    })
+  ) {
+    log.warn(`exec completion lacked a delivery decision: ${runLogContext} — retrying once`);
+    return { action: "retry" };
+  }
   const emptyAssistantReplyIsSilent = shouldTreatEmptyAssistantReplyAsSilent({
     // The host intentionally suppressed its cron placeholder, not a required model answer.
     terminalReplyExpectation:

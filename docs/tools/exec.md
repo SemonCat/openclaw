@@ -292,6 +292,8 @@ Ordinary work that yields a handle, then poll:
 
 Use `process poll` for on-demand status and bounded waits when no automatic completion wake is available. Avoid rapid status loops; pass a timeout while waiting for a result the current task needs. If automatic completion wake is enabled, the command can wake the session when it emits output or fails.
 
+A delivered terminal `process poll` result or a `process log` result containing all retained output from a finished command cancels that command's pending completion wake. Running logs and partial log pages leave the wake pending. Preparing a result without delivering or persisting it does not acknowledge the notification.
+
 Send keys (tmux-style):
 
 ```json

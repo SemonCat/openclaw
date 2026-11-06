@@ -5,10 +5,12 @@ import type { SessionTranscriptUsageSnapshot } from "./session-transcript-derive
 export type SessionTranscriptSummaryQuery =
   | { kind: "usage" }
   | { kind: "recovery-checkpoint" }
+  | { kind: "yielded-recovery-runs"; runIds: string[]; notBefore: number }
   | { kind: "mcp-app"; lookup: McpAppTranscriptLookup };
 
 export type SessionTranscriptSummaryResult =
   | { kind: "usage"; usage: SessionTranscriptUsageSnapshot | null }
+  | { kind: "yielded-recovery-runs"; yieldedRunIds: string[] }
   | {
       kind: "recovery-checkpoint";
       checkpoint: ReturnType<typeof selectMainSessionRecoveryCheckpoint>;
@@ -21,6 +23,14 @@ type TranscriptVisit = (visit: (message: unknown) => void) => void;
 export async function prepareSessionTranscriptSummaryReader(
   query: SessionTranscriptSummaryQuery,
 ): Promise<(visit: TranscriptVisit) => SessionTranscriptSummaryResult> {
+  if (query.kind === "yielded-recovery-runs") {
+    const { selectMainSessionYieldedRuns } =
+      await import("../agents/main-session-recovery/main-session-recovery-checkpoint.js");
+    return (visit) => ({
+      kind: "yielded-recovery-runs",
+      yieldedRunIds: selectMainSessionYieldedRuns(visit, query.runIds, query.notBefore),
+    });
+  }
   if (query.kind === "recovery-checkpoint") {
     const { selectMainSessionRecoveryCheckpoint } =
       await import("../agents/main-session-recovery/main-session-recovery-checkpoint.js");

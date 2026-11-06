@@ -123,15 +123,21 @@ export function normalizeDirectCronDeliveryPayloads(params: {
 export function appendCronRunInspectionLink(
   payloads: ReplyPayload[],
   inspectionUrl: string | undefined,
+  channel: string,
 ): ReplyPayload[] {
   const index = payloads.findLastIndex((payload) => payload.text?.trim());
   if (!inspectionUrl || index < 0) {
     return payloads;
   }
   const payload = payloads[index]!;
+  // Angle-bracket destinations preserve parentheses in Mattermost links.
+  const footer =
+    channel === "mattermost" && !/[<>\s]/.test(inspectionUrl)
+      ? `\n\n[查看執行紀錄](<${inspectionUrl}>)`
+      : `\nInspect: ${inspectionUrl}`;
   const linked = copyReplyPayloadMetadata(payload, {
     ...payload,
-    text: `${payload.text}\nInspect: ${inspectionUrl}`,
+    text: `${payload.text}${footer}`,
   });
   return payloads.map((entry, at) => (at === index ? linked : entry));
 }

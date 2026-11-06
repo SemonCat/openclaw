@@ -32,6 +32,7 @@ import {
   peekSystemEvents,
   resetSystemEventsForTest,
   resolveSystemEventDeliveryContext,
+  subscribeSystemEventQueueCapacity,
   type SystemEvent,
 } from "./system-events.js";
 
@@ -152,6 +153,26 @@ describe("delivery-owned system event selection", () => {
     expect(peekSystemEvents(sessionKey)).toEqual(["Deferred notice"]);
     expect(passiveReceipt()).toBe(true);
     expect(peekSystemEvents(sessionKey)).toEqual([]);
+  });
+
+  it("retires capacity waiters on soft restart while retaining passive queue entries", async () => {
+    const sessionKey = "agent:main:capacity-restart";
+    for (let index = 0; index < 20; index += 1) {
+      expect(
+        enqueueSystemEventEntry(`Passive ${index}`, {
+          sessionKey,
+          contextKey: `passive:${index}`,
+        }),
+      ).toBeDefined();
+    }
+    const retired = vi.fn();
+    const cancel = subscribeSystemEventQueueCapacity(sessionKey, retired);
+    expect(cancel).toBeTypeOf("function");
+
+    await drainGlobalSingletonLifecycleState("restart");
+
+    expect(retired).toHaveBeenCalledExactlyOnceWith(false);
+    expect(peekSystemEvents(sessionKey)).toHaveLength(20);
   });
 
   it("returns only a rejected claim to passive custody and rejects its stale handles", () => {

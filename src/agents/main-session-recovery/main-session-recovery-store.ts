@@ -4,6 +4,7 @@ import {
   hasMainSessionRecoveryClaim,
   hasRestartRecoveryTerminalRun,
   isMainRestartRecoveryCandidate,
+  mergeRestartRecoveryTerminalRunIds,
 } from "../../config/sessions/restart-recovery-state.js";
 import { applySessionEntryReplacements } from "../../config/sessions/session-accessor.js";
 import { getAgentEventLifecycleGeneration } from "../../infra/agent-events.js";
@@ -22,6 +23,7 @@ import {
 import {
   captureYieldedMainSessionContinuation,
   resolveRestartRecoveryDispatchIdentity,
+  prepareCompletedYieldedMainSessionReconciliation,
 } from "./main-session-restart-recovery-target.js";
 
 export type MainSessionRecoveryStoreTarget = {
@@ -83,7 +85,13 @@ export async function commitMainSessionRecovery(params: {
     params.command.kind === "validate_foreground" || params.command.kind === "release_foreground"
       ? params.command.claim
       : undefined;
+  const expectedGeneration = currentGenerationRequiredBy(params.command);
+  const isCommandCurrent = () =>
+    params.shouldContinue?.() !== false &&
+    (!expectedGeneration || expectedGeneration === getAgentEventLifecycleGeneration());
   let yieldedContinuation: (() => boolean) | undefined;
+  let completedYield: Awaited<ReturnType<typeof prepareCompletedYieldedMainSessionReconciliation>>;
+  let reconciledYield = false;
   return await applySessionEntryReplacements<MainSessionRecoveryStoreResult>({
     agentId: params.target.agentId,
     requireWriteSuccess: params.requireWriteSuccess,
@@ -97,6 +105,12 @@ export async function commitMainSessionRecovery(params: {
       params.expectedSessionId,
     storePath: params.target.storePath,
     assertCommitAllowed: () => {
+      if (!isCommandCurrent()) {
+        throw new Error("Recovery command changed before commit");
+      }
+      if (reconciledYield && !completedYield?.isCurrent()) {
+        throw new Error("Completed requester custody changed before recovery reconciliation");
+      }
       if (
         yieldedContinuation &&
         (!yieldedContinuation() ||
@@ -106,13 +120,9 @@ export async function commitMainSessionRecovery(params: {
         throw new Error("Yielded requester continuation changed before recovery handoff");
       }
     },
-    update: (entries) => {
+    update: async (entries) => {
       // Shutdown can begin while recovery waits for writer admission.
-      const expectedGeneration = currentGenerationRequiredBy(params.command);
-      if (
-        params.shouldContinue?.() === false ||
-        (expectedGeneration && expectedGeneration !== getAgentEventLifecycleGeneration())
-      ) {
+      if (!isCommandCurrent()) {
         return {
           result: {
             transition: { kind: "rejected", reason: "stale_generation" },
@@ -168,6 +178,34 @@ export async function commitMainSessionRecovery(params: {
       const previousRecoveryState = entry.mainRestartRecovery;
       const previousRecoveryRuns = entry.restartRecoveryRuns;
       const previousDeliveryRunId = entry.restartRecoveryDeliveryRunId;
+      if (params.command.kind === "claim_foreground" || params.command.kind === "observe") {
+        completedYield = await prepareCompletedYieldedMainSessionReconciliation({
+          ...params.target,
+          sessionKey: candidate.sessionKey,
+          entry,
+        });
+      }
+      if (!isCommandCurrent()) {
+        return { result: { transition: { kind: "rejected", reason: "stale_generation" } } };
+      }
+      const reconciliation = completedYield;
+      if (reconciliation?.isCurrent()) {
+        const remaining = entry.restartRecoveryRuns?.filter(
+          (run) =>
+            !reconciliation.fences.some(
+              (fence) =>
+                fence.runId === run.runId && fence.lifecycleGeneration === run.lifecycleGeneration,
+            ),
+        );
+        entry.restartRecoveryRuns = remaining?.length ? remaining : undefined;
+        entry.restartRecoveryTerminalRunIds = mergeRestartRecoveryTerminalRunIds(
+          entry.restartRecoveryTerminalRunIds,
+          reconciliation.fences
+            .filter((fence) => !remaining?.some((run) => run.runId === fence.runId))
+            .map((fence) => fence.runId),
+        );
+        reconciledYield = true;
+      }
       const command =
         (params.command.kind === "claim_foreground" ||
           params.command.kind === "observe" ||
