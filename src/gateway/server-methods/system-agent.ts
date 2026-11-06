@@ -11,6 +11,7 @@ import {
   validateSystemAgentSetupDetectParams,
   validateSystemAgentSetupAutoParams,
   validateSystemAgentSetupVerifyParams,
+  type SystemAgentChatParams,
   type SystemAgentChatQuestion,
 } from "../../../packages/gateway-protocol/src/index.js";
 import { racePromiseWithAbortSignal } from "../../infra/abort-signal.js";
@@ -337,10 +338,35 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
     const { params: rawParams, respond, client, context } = options;
     const reject = (error: ReturnType<typeof errorShape>) => respond(false, undefined, error);
     const authority = readGatewayRequestMutationAuthority(options);
-    const params = sanitizeSystemAgentChatParams(rawParams);
-    if (!assertValidParams(params, validateSystemAgentChatParams, "openclaw.chat", respond)) {
+    const sanitizedParams = sanitizeSystemAgentChatParams(rawParams);
+    if (
+      !assertValidParams(sanitizedParams, validateSystemAgentChatParams, "openclaw.chat", respond)
+    ) {
       return;
     }
+    const trustedAgentRuntime = client?.internal?.agentRuntimeIdentity;
+    // A verified agent caller is always delegated, even if RPC arguments omit that fact.
+    const params: SystemAgentChatParams = trustedAgentRuntime
+      ? {
+          ...sanitizedParams,
+          delegation: {
+            agentId: trustedAgentRuntime.agentId,
+            sessionKey: trustedAgentRuntime.sessionKey,
+            ...(trustedAgentRuntime.turnSourceChannel
+              ? { turnSourceChannel: trustedAgentRuntime.turnSourceChannel }
+              : {}),
+            ...(trustedAgentRuntime.turnSourceTo
+              ? { turnSourceTo: trustedAgentRuntime.turnSourceTo }
+              : {}),
+            ...(trustedAgentRuntime.turnSourceAccountId
+              ? { turnSourceAccountId: trustedAgentRuntime.turnSourceAccountId }
+              : {}),
+            ...(trustedAgentRuntime.turnSourceThreadId !== undefined
+              ? { turnSourceThreadId: trustedAgentRuntime.turnSourceThreadId }
+              : {}),
+          },
+        }
+      : sanitizedParams;
     const inputError = getSystemAgentChatInputError(params);
     if (inputError) {
       reject(errorShape(ErrorCodes.INVALID_REQUEST, inputError));
@@ -365,11 +391,19 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
     });
     const assertCurrent = () => {
       authority.assertCurrent();
+      // Transport authority does not prove that a verified wire caller's run is still live.
+      if (
+        trustedAgentRuntime &&
+        context.validateAgentRuntimeApprovalAuthority?.(trustedAgentRuntime) !== true
+      ) {
+        throw new Error("agent runtime authority is no longer active");
+      }
       transcript.assertCurrent();
       greetingCache.assertCurrent();
     };
     const pending = await runSystemAgentGatewayTask(async () => {
       ownedSession = context.systemAgentSessions.get(params.sessionId);
+      // Admission may precede a wait for the serialized system-agent task owner.
       assertCurrent();
       const sessions = context.systemAgentSessions;
       const sessionId = params.sessionId;
@@ -448,6 +482,7 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
           );
           return undefined;
         }
+        assertCurrent();
         const engine = new SystemAgentChatEngine({
           surface: "gateway",
           deps: {
@@ -475,10 +510,12 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
               engine,
               locale: client?.connect.locale,
             });
+            assertCurrent();
             welcome = onboardingWelcome.text;
             welcomeQuestion = onboardingWelcome.question;
           } else if (params.welcomeVariant === "new-agent") {
             welcome = await buildNewAgentWelcome({ engine });
+            assertCurrent();
           } else {
             const overview = await engine.loadOverview();
             const facts = await loadSystemAgentGreetingFacts({ env, cacheStore: greetingCache });
@@ -556,7 +593,10 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
             !session.pendingApproval &&
             !session.engine.getPendingOperatorProposal()
           ) {
-            session.newAgentWelcome ??= await buildNewAgentWelcome({ engine: session.engine });
+            const newAgentWelcome =
+              session.newAgentWelcome ?? (await buildNewAgentWelcome({ engine: session.engine }));
+            assertCurrent();
+            session.newAgentWelcome = newAgentWelcome;
             respond(
               true,
               { sessionId, reply: session.newAgentWelcome, optionalWelcome: false, action: "none" },
@@ -593,6 +633,7 @@ export const systemAgentHandlers: GatewayRequestHandlers = {
             session,
             sessionId,
             delegation: params.delegation,
+            ...(trustedAgentRuntime ? { trustedAgentRuntime } : {}),
           });
         }
         const turnReply = await runSystemAgentChatInput({

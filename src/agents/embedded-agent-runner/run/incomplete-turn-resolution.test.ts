@@ -37,7 +37,7 @@ describe("incomplete-turn terminal metadata", () => {
     ).toBeNull();
   });
 
-  it("keeps the side-effect warning when the terminal error is a provider refusal", () => {
+  it("keeps the provider refusal reason alongside the side-effect warning", () => {
     const assistant = buildEmbeddedRunnerAssistant({
       provider: "anthropic",
       stopReason: "error",
@@ -64,9 +64,53 @@ describe("incomplete-turn terminal metadata", () => {
         attempt,
       }),
     ).toBe(
-      "⚠️ Agent couldn't generate a response. Note: some tool actions may have already been executed — please verify before retrying.",
+      "The AI provider refused this request because it flagged possible cybersecurity risk (cyber_policy). Review the request and the provider's access requirements before continuing. Some actions may have completed; check their results. Note: some tool actions may have already been executed — please verify before retrying.",
     );
   });
+
+  it.each([false, true])(
+    "surfaces a content-filtered response with potential side effects: %s",
+    (hadPotentialSideEffects) => {
+      const assistant = buildEmbeddedRunnerAssistant({
+        stopReason: "error",
+        errorMessage: "Provider incomplete_reason: content_filter",
+        diagnostics: [
+          {
+            type: "openai_responses_terminal",
+            timestamp: 0,
+            details: {
+              eventType: "response.incomplete",
+              stopReason: "error",
+              incompleteReason: "content_filter",
+              endTurn: "absent",
+            },
+          },
+        ],
+      });
+      const attempt = makeEmbeddedRunnerAttempt({
+        currentAttemptAssistant: assistant,
+        toolMetas: hadPotentialSideEffects ? [{ toolName: "exec" }] : [],
+      });
+
+      const text = resolveIncompleteTurnPayloadText({
+        payloadCount: 0,
+        aborted: false,
+        externalAbort: false,
+        timedOut: false,
+        attempt,
+      });
+
+      expect(text).toBe(
+        "The AI provider stopped this response because of its content filter (content_filter). Review the request before trying again." +
+          (hadPotentialSideEffects
+            ? " Note: some tool actions may have already been executed — please verify before retrying."
+            : ""),
+      );
+      if (hadPotentialSideEffects) {
+        expect(resolveReplayInvalidFlag({ attempt, incompleteTurnText: text })).toBe(true);
+      }
+    },
+  );
 
   it("keeps an explicitly replay-safe structured provider refusal replayable", () => {
     const assistant = buildEmbeddedRunnerAssistant({

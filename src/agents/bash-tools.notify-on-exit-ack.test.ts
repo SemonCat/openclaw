@@ -7,6 +7,7 @@ import {
   setRuntimeConfigSnapshot,
 } from "../config/runtime-snapshot.js";
 import { writeSessionEntry } from "../config/sessions/session-accessor.sqlite-entry-store.js";
+import { captureExecRequestOwners, withExecRequestTurn } from "../infra/exec-request-context.js";
 import {
   consumeSelectedSystemEventEntries,
   enqueueSystemEventEntry,
@@ -20,6 +21,8 @@ import {
   createOpenClawTestState,
   type OpenClawTestState,
 } from "../test-utils/openclaw-test-state.js";
+import { captureExecRequestCancellation } from "./bash-process-control.js";
+import { appendOutput } from "./bash-process-registry.js";
 import { resetProcessRegistryForTests } from "./bash-process-registry.test-support.js";
 import { startDeferredNotifyRun } from "./bash-tools.notify-on-exit-ack.test-support.js";
 import { createProcessTool } from "./bash-tools.process.js";
@@ -79,6 +82,17 @@ const execute = (action: "poll" | "clear", sessionId: string) =>
   processTool.execute(`${action}-${sessionId}`, { action, sessionId });
 const poll = (sessionId: string) => execute("poll", sessionId);
 const contexts = () => peekSystemEventEntries(QUEUE_KEY).map((event) => event.contextKey);
+function fillSystemEventQueue() {
+  for (let index = 0; index < 20; index += 1) {
+    expect(
+      enqueueSystemEventEntry(`filler ${index}`, {
+        sessionKey: QUEUE_KEY,
+        contextKey: `filler:${index}`,
+      }),
+    ).not.toBeNull();
+  }
+  return peekSystemEventEntries(QUEUE_KEY);
+}
 
 async function finishNotifyRun(process: Awaited<ReturnType<typeof startDeferredNotifyRun>>) {
   await process.finish();
@@ -189,4 +203,157 @@ it("keeps an identical successor queued when an earlier consumer settles", async
   expect(peekSystemEventEntries(QUEUE_KEY)).toEqual(queued);
   acknowledgeInternalToolResult(successorResult);
   expect(peekSystemEventEntries(QUEUE_KEY)).toEqual([]);
+});
+
+it("cancels a completion only after a complete terminal log is delivered", async () => {
+  const process = await startNotifyRun();
+  const receipt = await finishNotifyRun(process);
+  enqueueSystemEventEntry("unrelated", { sessionKey: QUEUE_KEY, contextKey: "marker" });
+
+  const result = await processTool.execute("read-completed-log", {
+    action: "log",
+    sessionId: process.run.session.id,
+    limit: 100,
+  });
+  expect(result.details).toMatchObject({ status: "completed", output: "producer output" });
+  expect(contexts()).toEqual([`exec:${process.run.session.id}`, "marker"]);
+
+  acknowledgeInternalToolResult(result);
+  expect(contexts()).toEqual(["marker"]);
+  await expect(receipt.settled).resolves.toMatchObject({
+    status: "cancelled",
+    executionStarted: false,
+  });
+});
+
+it.each([
+  { name: "default tail", page: {} },
+  { name: "explicit tail", page: { limit: 100 } },
+  { name: "prefix", page: { offset: 0, limit: 100 } },
+  { name: "suffix", page: { offset: 1 } },
+  { name: "empty page", page: { limit: 0 } },
+])("keeps the completion after reading a partial log ($name)", async ({ page }) => {
+  const process = await startNotifyRun();
+  appendOutput(process.run.session, "stdout", "x\n".repeat(200));
+  await finishNotifyRun(process);
+
+  acknowledgeInternalToolResult(
+    await processTool.execute("read-partial-log", {
+      action: "log",
+      sessionId: process.run.session.id,
+      ...page,
+    }),
+  );
+  expect(contexts()).toEqual([`exec:${process.run.session.id}`]);
+});
+
+it("keeps a future completion after reading the running log", async () => {
+  const process = await startNotifyRun();
+  const result = await processTool.execute("read-running-log", {
+    action: "log",
+    sessionId: process.run.session.id,
+  });
+  expect(result.details).toMatchObject({ status: "running", output: "producer output" });
+  acknowledgeInternalToolResult(result);
+
+  await finishNotifyRun(process);
+  expect(contexts()).toEqual([`exec:${process.run.session.id}`]);
+});
+
+it("retries a completion once when system-event capacity opens", async () => {
+  const fillers = fillSystemEventQueue();
+  const process = await startNotifyRun();
+
+  await process.finish();
+
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+  expect(vi.mocked(enqueueSessionEvent).mock.results[0]?.type).toBe("throw");
+  expect(contexts()).toEqual(fillers.map((event) => event.contextKey));
+
+  expect(consumeSelectedSystemEventEntries(QUEUE_KEY, [fillers[0]!])).toHaveLength(1);
+
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(2);
+  const retried = vi.mocked(enqueueSessionEvent).mock.results.at(-1);
+  if (retried?.type !== "return") {
+    throw new Error("Expected the retried completion receipt");
+  }
+  expect(vi.mocked(enqueueSessionEvent).mock.calls[1]?.[1].expectedTarget).toBe(
+    vi.mocked(enqueueSessionEvent).mock.calls[0]?.[1].expectedTarget,
+  );
+  await expect(retried.value.accepted).resolves.toEqual({ ok: true });
+  expect(contexts().filter((context) => context === `exec:${process.run.session.id}`)).toHaveLength(
+    1,
+  );
+  expect(peekSystemEventEntries(QUEUE_KEY)).toHaveLength(20);
+
+  acknowledgeInternalToolResult(await poll(process.run.session.id));
+  await expect(retried.value.settled).resolves.toMatchObject({
+    status: "cancelled",
+    executionStarted: false,
+  });
+  expect(contexts()).toEqual(fillers.slice(1).map((event) => event.contextKey));
+});
+
+it("cancels a capacity retry when the terminal poll is acknowledged first", async () => {
+  fillSystemEventQueue();
+  const process = await startNotifyRun();
+
+  await process.finish();
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+
+  acknowledgeInternalToolResult(await poll(process.run.session.id));
+  expect(
+    consumeSelectedSystemEventEntries(QUEUE_KEY, [peekSystemEventEntries(QUEUE_KEY)[0]!]),
+  ).toHaveLength(1);
+
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+  expect(contexts()).toHaveLength(19);
+  expect(contexts()).not.toContain(`exec:${process.run.session.id}`);
+});
+
+it("cancels a capacity retry when the system-event lifecycle resets", async () => {
+  fillSystemEventQueue();
+  const process = await startNotifyRun();
+
+  await process.finish();
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+
+  resetSystemEventsForTest();
+
+  expect(process.run.session.notifyOnExitRetryCancel).toBeUndefined();
+  expect(peekSystemEventEntries(QUEUE_KEY)).toEqual([]);
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+});
+
+it("cancels a capacity retry when its exec request is stopped", async () => {
+  const fillers = fillSystemEventQueue();
+  const identity = {
+    runId: "notify-retry-stop",
+    sessionKey: QUEUE_KEY,
+    sessionId: "notify-retry-session",
+    agentId: "main",
+  };
+  let requestOwners: ReturnType<typeof captureExecRequestOwners> = undefined;
+  await withExecRequestTurn({ identity }, async () => {
+    requestOwners = captureExecRequestOwners(identity);
+  });
+  expect(requestOwners).toHaveLength(1);
+  const process = await startDeferredNotifyRun({
+    spawn: supervisorSpawnMock,
+    sessionKey: QUEUE_KEY,
+    requestOwners,
+  });
+
+  await process.finish();
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+
+  const cancellation = captureExecRequestCancellation(identity);
+  expect(cancellation.owners).toHaveLength(1);
+  expect(cancellation.cancel()).toBe(true);
+  await cancellation.settle();
+  expect(process.run.session.notifyOnExitRetryCancel).toBeUndefined();
+
+  expect(consumeSelectedSystemEventEntries(QUEUE_KEY, [fillers[0]!])).toHaveLength(1);
+  expect(enqueueSessionEvent).toHaveBeenCalledTimes(1);
+  expect(contexts()).toEqual(fillers.slice(1).map((event) => event.contextKey));
 });

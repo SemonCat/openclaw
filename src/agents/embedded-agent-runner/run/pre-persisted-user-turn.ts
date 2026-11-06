@@ -74,6 +74,17 @@ function isInterruptedTurnEntry(entry: SessionEntry, runId: string): boolean {
   );
 }
 
+// Admission owns the redacted bytes; resolving the source again can recover the
+// original credentials and make this same turn fail its replay witness.
+function resolveAdmittedUserTurnMessage(
+  message: PersistedUserTurnMessage | undefined,
+  recorder: UserTurnTranscriptRecorder | undefined,
+): PersistedUserTurnMessage | undefined {
+  const idempotencyKey = message?.idempotencyKey;
+  const admitted = recorder?.getPersistedMessage?.();
+  return idempotencyKey && admitted?.idempotencyKey === idempotencyKey ? admitted : message;
+}
+
 function selectCurrentUserTurnFromCohort(params: {
   sessionManager: SessionManager;
   message: PersistedUserTurnMessage;
@@ -133,7 +144,8 @@ export function prepareInitialPersistedUserTurnCohort(params: {
   recorder: UserTurnTranscriptRecorder | undefined;
   runId: string;
 }) {
-  const { message, recorder } = params;
+  const { recorder } = params;
+  const message = resolveAdmittedUserTurnMessage(params.message, recorder);
   const hint = recorder?.getAdmissionReceipt()?.entryId;
   if (!message?.idempotencyKey || !recorder || !hint) {
     return undefined;
@@ -197,7 +209,8 @@ export async function preparePersistedCurrentUserTurn(params: {
   signal?: AbortSignal;
   initial?: InitialPersistedUserTurn;
 }): Promise<InitialUserTurnReplayPreparation | undefined> {
-  const { sessionManager, message, recorder, runId } = params;
+  const { sessionManager, recorder, runId } = params;
+  const message = resolveAdmittedUserTurnMessage(params.message, recorder);
   const sessionTarget = sessionManager.getSessionTarget();
   if (!sessionTarget || !message?.idempotencyKey || !recorder) {
     return undefined;

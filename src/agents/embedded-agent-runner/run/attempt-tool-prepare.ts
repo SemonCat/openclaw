@@ -1,6 +1,7 @@
 import type { SessionPermissionMode } from "../../../../packages/gateway-protocol/src/schema/sessions-row.js";
 import { getReplyOperationSessionReader } from "../../../auto-reply/reply/reply-run-registry.state.js";
 import { messageToolOwnsVisibleReply } from "../../../auto-reply/source-reply-delivery-mode.js";
+import { composeSessionSourceAssertion } from "../../../config/sessions/session-source-authority.js";
 import type { DiagnosticTraceContext } from "../../../infra/diagnostic-trace-context.js";
 import { isEmbeddedMode } from "../../../infra/embedded-mode.js";
 import {
@@ -335,6 +336,10 @@ export async function prepareEmbeddedAttemptToolBase(params: {
         codeModeSkills,
         installedSkills: params.installedSkills,
         preparedModelRuntime: attempt.preparedModelRuntime,
+        sourceReplyOnly: attempt.execCompletionDeliveryRecovery ? true : undefined,
+        sourceReplyDeliveryAllowed: attempt.execCompletionDeliveryRecovery
+          ? () => attempt.canRecoverExecCompletionDelivery?.() === true
+          : undefined,
         requireWorkspaceOnly: attempt.requireWorkspaceOnly,
         sessionReadScopeKey: attempt.sessionReadScopeKey,
         sessionConfigSource: attempt.oneShotCliRun ? "pinned" : "runtime",
@@ -411,7 +416,16 @@ export async function prepareEmbeddedAttemptToolBase(params: {
         undefined,
         {
           reader: getReplyOperationSessionReader(attempt.replyOperation),
-          assertCurrent: assertActive,
+          assertCurrent: attempt.execCompletionDeliveryRecovery
+            ? composeSessionSourceAssertion([
+                assertActive,
+                () => {
+                  if (attempt.canRecoverExecCompletionDelivery?.() !== true) {
+                    throw new Error("Exec completion source delivery is no longer permitted.");
+                  }
+                },
+              ])
+            : assertActive,
         },
       );
       // Built-in tools retain their own authority wrappers; both harness paths share readiness.

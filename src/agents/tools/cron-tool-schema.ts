@@ -438,6 +438,14 @@ function buildCronToolSchema(options?: CronToolSchemaOptions): TSchema {
         description: 'Job offset for action="list"; use nextOffset to load the next page',
       }),
       job: managementOnly ? Type.Optional(Type.Omit(job, ["declarationKey", "owner"])) : job,
+      waitSeconds: Type.Optional(
+        Type.Integer({
+          minimum: 0,
+          maximum: 60,
+          description:
+            'For action="runs", wait in this conversation for runId to finish. Default 0. Timeout stops waiting only; do not create a cron watcher for another job.',
+        }),
+      ),
       jobId: Type.Optional(Type.String()),
       id: Type.Optional(Type.String()),
       in: Type.Optional(
@@ -454,7 +462,7 @@ function buildCronToolSchema(options?: CronToolSchemaOptions): TSchema {
           'Run mode for action="run": omitted defaults to "due"; use "force" to trigger now.',
       }),
       runId: Type.Optional(
-        Type.String({ description: 'Run id from action="run" to read with action="runs"' }),
+        Type.String({ description: 'Exact run returned by action="run"; filters action="runs".' }),
       ),
       contextMessages: Type.Optional(
         Type.Integer({ minimum: 0, maximum: REMINDER_CONTEXT_MESSAGES_MAX }),
@@ -488,6 +496,6 @@ function buildCronToolSchema(options?: CronToolSchemaOptions): TSchema {
     ]);
   }
   return managementOnly
-    ? Type.Omit(schema, ["in", "text", "mode", "contextMessages", "sessionKey", "runId"])
+    ? Type.Omit(schema, ["in", "text", "mode", "contextMessages", "sessionKey"])
     : schema;
 }

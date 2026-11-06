@@ -504,7 +504,7 @@ export function createProcessTool(
               return failText(`Session ${sessionId} is not backgrounded.`);
             }
             const window = resolveLogSliceWindow(params.offset, params.limit);
-            const { slice, totalLines, totalChars } = sliceLogLines(
+            const { slice, totalLines, totalChars, complete } = sliceLogLines(
               record.aggregated,
               window.effectiveOffset,
               window.effectiveLimit,
@@ -522,7 +522,7 @@ export function createProcessTool(
                 buildInputWaitHint(runtime.waitingForInput) +
                 (runtime.followUp ? `\n\n${runtime.followUp}` : "")
               : appendExecTimeoutRetryGuidance(text, record.exitReason);
-            return textResult(output, {
+            const result = textResult(output, {
               ...(runtime
                 ? {
                     status: record.exited ? "completed" : "running",
@@ -538,6 +538,12 @@ export function createProcessTool(
               totalChars,
               truncated: record.truncated,
             });
+            if (scopedFinished && complete) {
+              return attachInternalToolResultAcknowledgement(result, () =>
+                acknowledgeNotifyOnExit(scopedFinished),
+              );
+            }
+            return result;
           });
         }
 

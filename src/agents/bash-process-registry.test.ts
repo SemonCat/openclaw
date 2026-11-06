@@ -22,6 +22,7 @@ import {
   markExited,
   prepareSessionPoll,
   recordNotifyOnExitRemoval,
+  recordNotifyOnExitRetryCancel,
   tail,
 } from "./bash-process-registry.js";
 import { createProcessSessionFixture } from "./bash-process-registry.test-helpers.js";
@@ -443,7 +444,7 @@ describe("bash process registry", () => {
     }
   });
 
-  it("expires by completion-relative deadlines without retiring captured poll or notification receipts", () => {
+  it("expires pending notification retries without retiring accepted notification receipts", () => {
     vi.useFakeTimers();
     try {
       vi.setSystemTime(new Date("2026-07-09T00:00:00Z"));
@@ -466,7 +467,9 @@ describe("bash process registry", () => {
       const endedAt = short.endedAt;
       const expiresAt = short.expiresAt;
       const remove = vi.fn(() => true);
+      const cancelRetry = vi.fn();
       recordNotifyOnExitRemoval(short, remove);
+      recordNotifyOnExitRetryCancel(short, cancelRetry);
       const delivery = prepareSessionPoll(short, {});
       expect(delivery.output).toBe("retained poll output");
       expect(long.expiresAt! - long.endedAt!).toBe(3 * 60 * 60 * 1000);
@@ -481,6 +484,7 @@ describe("bash process registry", () => {
       expect(short.expiresAt).toBe(expiresAt);
       expect(short.pendingPollDelivery?.output).toBe("retained poll output");
       expect(remove).not.toHaveBeenCalled();
+      expect(cancelRetry).toHaveBeenCalledOnce();
       delivery.acknowledge();
       acknowledgeNotifyOnExit(short);
       expect(remove).toHaveBeenCalledOnce();
@@ -492,6 +496,34 @@ describe("bash process registry", () => {
       resetProcessRegistryForTests();
       vi.useRealTimers();
     }
+  });
+
+  it("cancels only pending notification retries when finished-count retention evicts a record", () => {
+    const oldest = createProcessSessionFixture({
+      id: "oldest-retry",
+      cleanupMs: 3 * 60 * 60 * 1000,
+      backgrounded: true,
+    });
+    addSession(oldest);
+    markExited(oldest, 0, null, "completed");
+    const cancelRetry = vi.fn();
+    const removeAcceptedReceipt = vi.fn(() => true);
+    recordNotifyOnExitRetryCancel(oldest, cancelRetry);
+    recordNotifyOnExitRemoval(oldest, removeAcceptedReceipt);
+
+    for (let index = 0; index < 50; index += 1) {
+      const session = createProcessSessionFixture({
+        id: `retained-${index}`,
+        cleanupMs: 3 * 60 * 60 * 1000,
+        backgrounded: true,
+      });
+      addSession(session);
+      markExited(session, 0, null, "completed");
+    }
+
+    expect(getFinishedSession(oldest.id)).toBeUndefined();
+    expect(cancelRetry).toHaveBeenCalledOnce();
+    expect(removeAcceptedReceipt).not.toHaveBeenCalled();
   });
 
   it.each(["delete", "scope", "reset"] as const)(

@@ -5,6 +5,8 @@ import { parseRetryAfterErrorSeconds } from "../internal/retry-after.js";
 import { projectDiagnosticValue, redactDiagnosticText } from "./credential-redaction.js";
 
 const MAX_ERROR_BODY_LENGTH = 4000;
+const CYBER_REFUSAL_MESSAGE_RE =
+  /^[^\r\n()]{1,256} refused this request \(safety filter: cyber_policy(?:\s*[\u2014:-]|\))/i;
 
 export type ProviderErrorProjection = {
   stopReason: "aborted" | "error";
@@ -105,6 +107,12 @@ function buildProjection(snapshot: unknown, signal?: AbortSignal): ProviderError
     readProviderErrorField(error, "code") ??
     readProviderErrorField(nestedError, "code") ??
     (error ? readCauseCode(error) : undefined) ??
+    // Some compatible proxies preserve the refusal only in their error message.
+    (CYBER_REFUSAL_MESSAGE_RE.test(
+      readProviderErrorField(nestedError, "message") ?? originalMessage ?? "",
+    )
+      ? "cyber_policy"
+      : undefined) ??
     (status === undefined ? undefined : String(status));
   const errorType =
     readProviderErrorField(error, "errorType") ??

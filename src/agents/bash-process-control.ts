@@ -95,7 +95,9 @@ export function captureExecRequestCancellation(
   const initialSessions = listExecSessionsForCancellation();
   const residualOwners = [
     ...initialSessions.flatMap((session) =>
-      !session.exited || session.finalizing ? (readExecRequestOwners(session) ?? []) : [],
+      !session.exited || session.finalizing || session.notifyOnExitRetryCancel
+        ? (readExecRequestOwners(session) ?? [])
+        : [],
     ),
     ...queued.flatMap(({ events }) =>
       events.flatMap((event) => readExecRequestOwners(event) ?? []),
