@@ -199,7 +199,7 @@ export function prepareEmbeddedRunTerminal(input: {
   const cleanYield = attempt.yieldDetected && input.terminalState.outcome.status === "ok";
   // Yield cleanup can abort the tool-call assistant before message_end. The
   // canonical successful pause owns that outcome, not the cleanup error text
-  // or an earlier completed cycle. Keep this attempt's streamed text below.
+  // or an earlier completed cycle.
   const payloadAssistant = cleanYield
     ? undefined
     : attempt.yieldDetected
@@ -208,6 +208,11 @@ export function prepareEmbeddedRunTerminal(input: {
   const payloads = buildEmbeddedRunPayloads({
     rateLimitRetriesExhausted: input.rateLimitRetriesExhausted,
     ...attempt,
+    // A handoff has no fallback answer for the current input. Earlier input
+    // segments and explicitly kept/tool-authored answers retain their custody.
+    assistantTexts: cleanYield
+      ? attempt.assistantTexts.slice(0, attempt.answerSegments?.at(-1)?.textEnd ?? 0)
+      : attempt.assistantTexts,
     assistantMessageIndex: attempt.lastAssistantTextMessageIndex,
     lastAssistant: payloadAssistant,
     currentAssistant: attempt.yieldDetected ? null : (payloadAssistant ?? null),

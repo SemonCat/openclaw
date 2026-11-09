@@ -1,11 +1,13 @@
 import { describe, expect, it, vi } from "vitest";
 import { getReplyPayloadMetadata } from "../../../auto-reply/reply-payload.js";
 import { createTestAdmittedRunContext } from "../../admitted-run-context.test-support.js";
+import { createSubscribedSessionHarness } from "../../embedded-agent-subscribe.e2e-harness.js";
 import {
   buildEmbeddedRunnerAssistant,
   makeEmbeddedRunnerAttempt,
 } from "../../test-helpers/embedded-agent-runner-e2e-fixtures.js";
 import { createUsageAccumulator } from "../usage-accumulator.js";
+import type { EmbeddedRunAttemptWithReceiptEvidence } from "./attempt-result.js";
 import { createEmbeddedRunContextRecoveryState } from "./context-recovery-state.js";
 import { YIELD_DIAGNOSTIC_TEXT } from "./incomplete-turn-resolution.js";
 import type { EmbeddedRunTerminalState } from "./terminal-outcome.js";
@@ -28,6 +30,7 @@ function prepareYield(
     trigger?: Parameters<typeof prepareEmbeddedRunTerminal>[0]["runParams"]["trigger"];
     terminalState?: EmbeddedRunTerminalState;
     lastToolError?: NonNullable<Parameters<typeof makeEmbeddedRunnerAttempt>[0]>["lastToolError"];
+    attempt?: Partial<EmbeddedRunAttemptWithReceiptEvidence>;
   } = {},
 ) {
   const assistant = buildEmbeddedRunnerAssistant({
@@ -48,6 +51,7 @@ function prepareYield(
     codeModeEngaged: input.codeModeEngaged,
     lastToolError: input.lastToolError ?? { toolName: "exec", error: "Command exited with code 1" },
     toolMetas: [{ toolName: "exec", isError: true }],
+    ...input.attempt,
   });
   const terminal = makeTerminalInput({
     attempt,
@@ -60,6 +64,7 @@ function prepareYield(
       admittedRunContext: createTestAdmittedRunContext("run:terminal-resolution"),
     },
     attempt,
+    currentAttemptCompletedAssistant: attempt.currentAttemptCompletedAssistant,
     provider: "openai",
     model: "mock-1",
     activeErrorContext: { provider: "openai", model: "mock-1" },
@@ -75,6 +80,86 @@ function prepareYield(
 }
 
 describe("yielded terminal payloads after an earlier tool failure", () => {
+  it.each([false, true])(
+    "does not replay tool-call prose after a textless yield (signed commentary=%s)",
+    async (signedCommentary) => {
+      const onAgentEvent = vi.fn();
+      const { emit, subscription } = createSubscribedSessionHarness({
+        runId: "yield-progress",
+        onAgentEvent,
+        onPartialReply: () => false,
+      });
+      try {
+        for (const [index, text] of [
+          "Inspecting the files.",
+          "Checking the tests.",
+          "Waiting for work.",
+        ].entries()) {
+          const message = buildEmbeddedRunnerAssistant({
+            api: "openai-completions",
+            stopReason: "toolUse",
+            content: [
+              {
+                type: "text",
+                text,
+                ...(signedCommentary
+                  ? {
+                      textSignature: JSON.stringify({
+                        v: 1,
+                        id: `progress-${index}`,
+                        phase: "commentary",
+                      }),
+                    }
+                  : {}),
+              },
+              { type: "toolCall", id: `call-${index}`, name: "exec", arguments: {} },
+            ],
+          });
+          emit({ type: "message_start", message });
+          emit({ type: "message_end", message });
+        }
+        const yieldMessage = buildEmbeddedRunnerAssistant({
+          api: "openai-completions",
+          stopReason: "toolUse",
+          content: [{ type: "toolCall", id: "yield", name: "sessions_yield", arguments: {} }],
+        });
+        emit({ type: "message_start", message: yieldMessage });
+        emit({ type: "message_end", message: yieldMessage });
+        await subscription.waitForPendingEvents();
+        expect(subscription.assistantTexts).toHaveLength(signedCommentary ? 0 : 3);
+        if (signedCommentary) {
+          expect(
+            onAgentEvent.mock.calls
+              .map(([event]) => event)
+              .filter((event) => event.stream === "item" && event.data.kind === "preamble"),
+          ).toEqual(
+            ["Inspecting the files.", "Checking the tests.", "Waiting for work."].map(
+              (progressText) =>
+                expect.objectContaining({
+                  stream: "item",
+                  data: expect.objectContaining({ kind: "preamble", phase: "end", progressText }),
+                }),
+            ),
+          );
+        }
+        const { terminal, prepared } = prepareYield({
+          assistantTexts: [...subscription.assistantTexts],
+          attempt: { lastAssistant: yieldMessage, currentAttemptCompletedAssistant: yieldMessage },
+        });
+        expect(prepared.payloadsWithToolMedia ?? []).toEqual([]);
+        const result = await resolveEmbeddedRunTerminal({ ...terminal, prepared });
+        expect(result.action).toBe("complete");
+        if (result.action !== "complete") {
+          throw new Error("Expected a paused terminal result");
+        }
+        expect(result.result.payloads ?? []).toEqual([]);
+        expect(result.result.meta).toMatchObject({ yielded: true, livenessState: "paused" });
+      } finally {
+        subscription.unsubscribe();
+      }
+    },
+  );
+
   it.each([
     {
       assistantTexts: [],
@@ -99,14 +184,12 @@ describe("yielded terminal payloads after an earlier tool failure", () => {
       lastToolError: { toolName: "exec", error: "Command exited with code 1" },
     },
   ])(
-    "preserves paused-turn payloads and continuation: $assistantTexts / $continuation",
+    "preserves cleanup-error suppression and continuation: $assistantTexts / $continuation",
     async (input) => {
       const { attempt, terminal, prepared } = prepareYield(input);
       expect(attempt.lastToolError).toBe(input.lastToolError);
       expect(terminal.terminalState.outcome.status).toBe("ok");
-      expect(prepared.payloadsWithToolMedia?.map((payload) => payload.text) ?? []).toEqual(
-        input.assistantTexts,
-      );
+      expect(prepared.payloadsWithToolMedia ?? []).toEqual([]);
       expect(prepared.payloadsWithToolMedia?.some((payload) => payload.isError)).not.toBe(true);
       expect(prepared.attemptToolSummary).toMatchObject({
         unresolvedError: { toolName: input.lastToolError.toolName },
@@ -126,11 +209,104 @@ describe("yielded terminal payloads after an earlier tool failure", () => {
         unresolvedError: { toolName: input.lastToolError.toolName },
       });
       expect(result.result.payloads ?? []).toEqual(
-        input.continuation
-          ? input.assistantTexts.map((text) => ({ text, replyToTag: false }))
-          : [{ text: YIELD_DIAGNOSTIC_TEXT }],
+        input.continuation ? [] : [{ text: YIELD_DIAGNOSTIC_TEXT }],
       );
       expect(terminal.sessionPromptState.activateInternalPrompt).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps a genuine final answer authoritative over preceding tool-call prose", () => {
+    const assistant = buildEmbeddedRunnerAssistant({
+      content: [{ type: "text", text: "Actual answer." }],
+    });
+    const { prepared } = prepareYield({
+      yieldDetected: false,
+      assistantTexts: ["Checking the files.", "Actual answer."],
+      attempt: {
+        lastAssistant: assistant,
+        currentAttemptCompletedAssistant: assistant,
+        lastToolError: undefined,
+      },
+    });
+    expect(prepared.payloadsWithToolMedia).toEqual([
+      expect.objectContaining({ text: "Actual answer." }),
+    ]);
+  });
+
+  it("preserves earlier input answers while discarding the yielded input's prose", () => {
+    const assistantTexts = ["Earlier answer.", "Checking the next input."];
+    const { prepared } = prepareYield({
+      assistantTexts,
+      attempt: {
+        answerSegments: [
+          {
+            textEnd: 1,
+            messageEnd: 0,
+            finalMessageStart: 0,
+            lastAssistant: buildEmbeddedRunnerAssistant({
+              content: [{ type: "text", text: "Earlier answer." }],
+            }),
+          },
+        ],
+      },
+    });
+    expect(prepared.payloadsWithToolMedia).toEqual([
+      expect.objectContaining({ text: "Earlier answer." }),
+    ]);
+    expect(getReplyPayloadMetadata(prepared.payloadsWithToolMedia?.[0] ?? {})).toMatchObject({
+      precedingInputAnswer: true,
+    });
+    expect(assistantTexts).toEqual(["Earlier answer.", "Checking the next input."]);
+  });
+
+  it("preserves a kept answer's media directives and tool-produced attachments", () => {
+    const { prepared } = prepareYield({
+      assistantTexts: ["Checking the files."],
+      attempt: {
+        keptAnswer: {
+          assistant: buildEmbeddedRunnerAssistant({
+            content: [
+              { type: "text", text: "Completed answer.\nMEDIA:https://example.test/answer.png" },
+            ],
+          }),
+          messageIndex: 0,
+        },
+        toolMediaUrls: ["https://example.test/tool.png"],
+      },
+    });
+    expect(prepared.payloadsWithToolMedia).toEqual([
+      expect.objectContaining({
+        text: "Completed answer.",
+        mediaUrls: ["https://example.test/answer.png", "https://example.test/tool.png"],
+      }),
+    ]);
+  });
+
+  it.each(["missing", "pending"] as const)(
+    "preserves tool-authored replies and %s source delivery custody",
+    (sourceReplyDeliveryState) => {
+      const { prepared } = prepareYield({
+        assistantTexts: ["Checking the files."],
+        attempt: {
+          sourceReplyDeliveryState,
+          messagingToolSourceReplyPayloads: [{ text: "Tool answer.", toolAuthored: true }],
+          toolMediaUrls: ["https://example.test/tool.png"],
+        },
+      });
+      expect(prepared.payloadsWithToolMedia).toEqual(
+        sourceReplyDeliveryState === "pending"
+          ? [expect.objectContaining({ text: "Tool answer." })]
+          : [
+              expect.objectContaining({
+                text: "Tool answer.",
+                mediaUrls: ["https://example.test/tool.png"],
+              }),
+            ],
+      );
+      if (sourceReplyDeliveryState === "pending") {
+        expect(prepared.payloadsWithToolMedia?.[0]?.mediaUrls).toBeUndefined();
+      }
+      expect(prepared.replyDeliveryState).toBe(sourceReplyDeliveryState);
     },
   );
 
