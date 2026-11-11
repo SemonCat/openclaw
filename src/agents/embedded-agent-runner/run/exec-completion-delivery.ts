@@ -53,15 +53,10 @@ export function tryRecoverExecCompletionDelivery(input: {
     input.terminalInterrupted ||
     projectAgentRunAttemptTerminal(attempt.terminal).promptError ||
     isTerminalAssistantError(input.attemptAssistant) ||
-    hasAttemptTerminalState({
-      ...attempt,
-      // A confirmed process failure is the result to report, not a delivered
-      // reply. Keep message failures and every other terminal effect fenced.
-      lastToolError:
-        attempt.lastToolError?.terminalDiagnostic?.kind === "process"
-          ? undefined
-          : attempt.lastToolError,
-    }) ||
+    // A confirmed process failure is the result to report, not a delivered
+    // reply. Keep message failures and every other terminal effect fenced.
+    (attempt.lastToolError && attempt.lastToolError.terminalDiagnostic?.kind !== "process") ||
+    hasAttemptTerminalState(attempt) ||
     resolveSourceReplyDelivery(attempt, input.prepared.replyDeliveryState) !== "missing" ||
     isHeartbeatAcknowledgementText(input.prepared.finalAssistantVisibleText) ||
     !input.attemptAssistant ||
